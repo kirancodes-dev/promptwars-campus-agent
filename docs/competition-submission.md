@@ -36,7 +36,7 @@ React 19 + Vite + Tailwind SPA → FastAPI (session middleware, rate limits, sec
 
 ## Google technology
 
-- **Gemini** (default `gemini-3.8-flash`, `google-genai`, JSON mode) for planning, behind strict validation with a deterministic fallback. *Integrated and tested with mocks; not exercised against the live API in this repository.*
+- **Gemini** (default `gemini-3.8-flash`, `google-genai`, JSON mode) for planning, behind strict validation with a deterministic fallback. *Integrated and tested with mocks; disabled in production and not verified against the live API.*
 - **Cloud Firestore** for durable per-session storage, with bounded queries and batched audit writes. *Verified live on the demo deployment.*
 - **Cloud Run (gen2) + Secret Manager + Artifact Registry/Cloud Build**: live demo in asia-south1, scale to zero, one instance. Steps in `deployment/cloud-run.md`.
 
@@ -52,15 +52,15 @@ Server-enforced approval policy; approval replay, tampering, expiry and cross-se
 
 ## Testing evidence (2026-10-09)
 
-- Backend: 304 automated tests (1 optional live-Gemini test skipped without a key), 86% line+branch coverage — including 21 realistic planning scenarios, 35 security tests and 9 mocked Gemini failure/abuse tests.
+- Backend: 312 automated tests (1 optional live-Gemini test skipped without a key), 86% line+branch coverage — including 21 realistic planning scenarios, 36 security tests and 15 mocked Gemini tests.
 - Frontend: 29 tests (88% line coverage), ESLint clean, production build succeeds.
 - Accessibility: axe-core 0 violations across 9 UI states; 30/30 keyboard-only checks; no horizontal scroll from 320 px or at 200% text size. Not tested with screen readers or real phones.
-- Live (Cloud Run + Firestore, revision 00004): plan → approve → read-back verification, replay/cross-session rejection, Secure cookie, no API docs — verified. Newer features (multi-day exam planning, "What I understood") are tested locally and will be live after the next deployment.
-- CI: GitHub Actions runs the same checks on every push.
+- Live (Cloud Run + Firestore, revision `campuspilot-ai-00005-c5s`, commit `e407c52`, smoke-tested 2026-10-09): full browser journey at 320–1440 px with 0 console errors; multi-day exam planning and "What I understood"; approve → Firestore save → read-back verification; replay 409, cross-session 404, tamper 400; rate limit 429; no API docs. Gemini is disabled in production; the built-in planner serves every request.
+- CI: GitHub Actions runs the same checks on every push; passing on the deployed commit.
 
 ## Known limitations
 
-No account authentication (anonymous sessions); single-instance requirement; server-local time zone (set to India for the demo); no external calendar integration; Gemini not verified live (no valid key); `docker run` not tested locally (the image builds on Cloud Build); screen readers and real phones not tested.
+No account authentication (anonymous sessions); single-instance requirement; server-local time zone (set to India for the demo); no external calendar integration; Gemini disabled in production and not verified live (the only key tried had no prepaid credits); `docker run` not tested locally (the image builds on Cloud Build); screen readers and real phones not tested.
 
 ## Demo instructions
 

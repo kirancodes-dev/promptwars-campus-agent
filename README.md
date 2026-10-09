@@ -1,10 +1,44 @@
-# CampusPilot AI
+<div align="center">
 
-**Tell CampusPilot what you need to study; it reads your schedule, plans conflict-free sessions, and changes nothing until you approve.**
+# 🎓 CampusPilot AI
 
-CampusPilot AI is an autonomous planning assistant for students, built for PromptWars × Error Zero 2026. It turns a plain-language goal into a step-by-step workflow, runs the safe read-only steps itself, asks for approval before any change to your data, then saves and verifies each change by reading it back.
+### The study planner that asks before it acts — and proves what it did.
 
-> Status: competition prototype, deployed as a demo at **https://campuspilot-ai-165103643932.asia-south1.run.app** (Google Cloud Run + Firestore, built-in planner). Not production-ready for a public multi-user service (no account login yet; see [Security limitations](#security-limitations)). See [what is verified where](#verification-status).
+[![CI](https://github.com/kirancodes-dev/promptwars-campus-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/kirancodes-dev/promptwars-campus-agent/actions/workflows/ci.yml)
+
+**[▶ Open the live app](https://campuspilot-ai-165103643932.asia-south1.run.app)** · [3-minute demo](docs/demo-script.md) · [Architecture](docs/architecture.md) · [Security review](docs/security.md) · [Test evidence](docs/testing.md)
+
+*Built for PromptWars × Error Zero 2026 — vertical: **AI Personal Assistant & Autonomous Agents***
+
+</div>
+
+---
+
+You type one sentence:
+
+> *"I have a DBMS exam on Friday and a DAA exam on Monday. I need 4 hours of DBMS and 3 hours of DAA."*
+
+CampusPilot reads your schedule, works out the days you have before each exam, and spreads study sessions across them, earliest exam first. It avoids your existing commitments and follows your saved preferences. Then it **stops and shows you exactly what it wants to change**. Nothing is saved until you tap **Approve**. After you approve, it saves each item, **reads it back from the database to prove it was saved correctly**, and records every step in an activity log you can open.
+
+Most AI assistants either only talk, or act without asking. CampusPilot does the planning work *and* keeps you in control.
+
+> **Live now:** Google Cloud Run + Firestore (asia-south1). Revision **`campuspilot-ai-00005-c5s`**, deployed from commit `e407c52`. The public app was smoke-tested end to end on 2026-10-09 ([results](#-verified-live)).
+>
+> **Gemini is disabled in production.** The app's built-in planner provides every feature on the live site; it needs no AI key.
+>
+> This is a competition prototype with anonymous browser sessions, not a production multi-user service. See [Known limitations](#known-limitations).
+
+## ✨ At a glance
+
+| | |
+|---|---|
+| 🧠 **Understands real goals** | Any subject and duration, dates ("tomorrow", "on Friday", "in 3 days", "15 Oct"), exam deadlines, priorities and meeting times. It shows **what it understood and where each fact came from**: *you said*, *saved preference*, *default* or *inferred*. |
+| ❓ **Asks instead of guessing** | If a date is vague ("next week"), an exam has no study time, or the time doesn't fit, it asks one focused question and quotes the real free time. |
+| 🔒 **Nothing changes without your yes** | Every data-changing step is held on the **server** for approval. An approval is tied to your session and a SHA-256 hash of the exact changes. It works only once and expires after 15 minutes. |
+| ✅ **Proves what it did** | It reports "saved" only after reading each item back from storage and confirming it matches what you approved. |
+| 🛡️ **Treats AI output as untrusted** | Plans can only use 17 allow-listed tools, and every parameter is validated. There is no `eval` or `exec`. The model can never approve its own changes. |
+| 📴 **Works without AI** | A deterministic planner covers every feature, and the app always shows which planner is running. |
+| 📱 **Designed for phones first** | Bottom navigation, a sticky approval bar and 44 px touch targets. No horizontal scrolling at any width from 320 px up. |
 
 ---
 
@@ -14,51 +48,73 @@ CampusPilot AI is an autonomous planning assistant for students, built for Promp
 
 CampusPilot AI is an academic and productivity assistant for students. It addresses the vertical as follows (each point is implemented in this repository):
 
-- **Understands goals.** A student writes a goal in plain English ("2 hours of DBMS, 1 hour of DAA, meeting at 4 PM", "DBMS exam on Friday and DAA exam on Monday, 4 hours and 3 hours"). The planner extracts subjects, durations, dates (today, tomorrow, weekdays, "in 3 days", "15 Oct"), exam deadlines, priorities, meeting times and explicitly requested times. It shows **what it understood and where each fact came from** (you said / saved preference / default / inferred) and states its assumptions. When something essential is missing or vague ("next week", an exam with no study time), it asks one focused question instead of guessing.
-- **Breaks goals into dependent steps.** Each goal becomes a structured workflow: ordered steps with explicit dependencies, validated for missing, self-referencing or circular dependencies before anything runs.
-- **Uses tools.** Steps call 17 allow-listed tools for tasks, schedule (including conflict checks and free-slot search), notes and study preferences.
+- **Understands goals.** A student writes a goal in plain English ("2 hours of DBMS, 1 hour of DAA, meeting at 4 PM", "DBMS exam on Friday and DAA exam on Monday, 4 hours and 3 hours"). The planner extracts:
+  - subjects and durations;
+  - dates (today, tomorrow, weekdays, "in 3 days", "15 Oct");
+  - exam deadlines and priorities;
+  - meeting times and explicitly requested times.
+
+  It shows **what it understood and where each fact came from** (you said / saved preference / default / inferred) and states its assumptions. When something essential is missing or vague ("next week", an exam with no study time), it asks one focused question instead of guessing.
+- **Breaks goals into dependent steps.** Each goal becomes a structured workflow of ordered steps with explicit dependencies. Before anything runs, the workflow is checked for missing, self-referencing and circular dependencies.
+- **Uses tools.** Steps call 17 allow-listed tools for tasks, the schedule (including conflict checks and free-slot search), notes and study preferences.
 - **Keeps a human in control.** Every step that would change data waits for the student's explicit approval; read-only steps run on their own.
 - **Verifies results.** After approval, each change is saved once and then read back from storage to confirm it matches what was approved.
-- **Is transparent.** Every workflow, approval, tool outcome and verification is recorded in an activity history and audit log visible in the app.
-- **Uses Gemini when configured.** With `GEMINI_API_KEY` set, Gemini (default `gemini-3.8-flash`) produces the plan as structured JSON; without a key, or if Gemini fails, a deterministic planner takes over and the app says so. (The Gemini path is tested with mocks; it has not been run against the live API in this repository.)
+- **Is transparent.** Every workflow, approval, tool result and verification is recorded in an activity history and audit log that the student can open in the app.
+- **Can use Gemini, but doesn't depend on it.** When `GEMINI_API_KEY` is set, Gemini (default `gemini-3.8-flash`) produces the plan as structured JSON. Without a key, or if Gemini fails, the deterministic planner takes over and the app says so. The Gemini path is covered by mocked tests only. It is **disabled in production** and has not run against the live API (see [Gemini](#gemini-optional)).
 
 ## The problem
 
-Students juggle classes, meetings and revision across tools that don't talk to each other. Generic chatbots can suggest a timetable, but they either can't act on your data or they act without asking. Students need an assistant that does the tedious planning *and* keeps them in control.
+Students juggle classes, meetings and revision across tools that don't talk to each other. Chatbots can suggest a timetable, but they either can't act on your data or they act without asking. Students need an assistant that does the tedious planning *and* keeps them in control.
 
-**Target users:** college students planning study sessions, deadlines and revision around existing commitments.
+**Target users:** college students who plan study sessions, deadlines and revision around existing commitments, mostly on their phones.
 
 ## How the solution works
 
-Try the flagship goal:
+Try the flagship goal (it's one tap on the home screen of the [live app](https://campuspilot-ai-165103643932.asia-south1.run.app)):
 
 > "Organize my preparation for tomorrow. I need 2 hours of DBMS, 1 hour of DAA, and I have a project meeting at 4 PM."
 
 CampusPilot will:
 
-1. Parse the subjects and durations you actually asked for (any subject, not a fixed list).
-2. Read your existing schedule and check the meeting slot for conflicts.
-3. Pick free slots inside your preferred study window, applying your break length and per-subject timing preferences (e.g. "DBMS in the evening").
-4. Show an 8-step plan: which steps read data, which would change it, and why.
-5. Ask you to approve the three proposed changes (two study blocks, one task). Nothing is saved yet.
-6. On approval, save each item, read it back to verify it, and report exactly what was saved.
-7. Record every step in an activity timeline and audit log.
+1. **Understand** the subjects and durations you asked for. Any subject works; there is no fixed list.
+2. **Read** your existing schedule and check the meeting slot for conflicts.
+3. **Find** free slots inside your preferred study window, using your break length and subject timing preferences (for example, "DBMS in the evening").
+4. **Explain** an 8-step plan: which steps only read data, which would change it, and why.
+5. **Ask** you to approve the three proposed changes (two study blocks, one task). Nothing is saved yet.
+6. **Save and verify:** after you approve, it saves each item, reads it back, and reports exactly what was saved.
+7. **Record** every step in an activity timeline and audit log.
 
-With exam dates, it plans across several days: each subject's study time is split into sessions of your preferred length and spread over the days before its exam, earliest exam first, within your study window and study days, never on the exam day. If the time cannot fit, it says how much free time there actually is instead of overbooking you.
+**Exam mode.** If the goal includes exam dates, CampusPilot plans across several days. Each subject's study time is split into sessions of your preferred length and spread over the days before that subject's exam, earliest exam first. Sessions stay inside your study window and study days, and never fall on the exam day. If the time doesn't fit, it tells you how much free time you actually have instead of overbooking you.
 
-Other things it understands: "Remember that I prefer studying DBMS in the evening, then plan …" (saves the preference and plans with it under one approval), "Review my schedule, identify free time, plan my DBMS revision", "Show my schedule", "Create a task to …", "Find my DBMS notes", "Reset my preferences".
+**It also understands:**
+- "Remember that I prefer studying DBMS in the evening, then plan …" (saves the preference and plans with it under one approval)
+- "Review my schedule, identify free time, plan my DBMS revision"
+- "Show my schedule"
+- "Create a task to …"
+- "Find my DBMS notes"
+- "Reset my preferences"
 
 ## Approach and logic
 
-CampusPilot separates *deciding* from *doing*. A planner (Gemini or the built-in rule-based planner) only proposes a plan. A server-side orchestrator then enforces the rules in code: validate the plan's dependencies, run read-only steps, hold every data-changing step for approval, execute approved steps once in dependency order, verify each result by reading it back, and log every event. Model output is treated as untrusted input, so the safety rules hold whichever planner produced the plan.
+CampusPilot separates *deciding* from *doing*. A planner (the built-in rule-based planner, or Gemini when configured) only proposes a plan. A server-side orchestrator then enforces the rules in code:
+
+1. **Validate** the plan's dependencies.
+2. **Run** the read-only steps.
+3. **Hold** every data-changing step for approval.
+4. **Execute** approved steps once, in dependency order.
+5. **Verify** each result by reading it back.
+6. **Log** every event.
+
+Planner output is treated as untrusted input, so these rules hold whichever planner produced the plan.
 
 What makes this approach different:
 
-- **Human approval as a security boundary, not a UI nicety.** Every data-changing tool is approval-gated on the server, whatever the planner or the AI model says. Approvals are bound to your session, the workflow and a SHA-256 hash of the exact reviewed actions; they're single-use and expire after 15 minutes. A client cannot approve by setting a flag.
-- **Verified results.** Success is reported only after the saved state is read back and matches what you approved.
-- **Honest fallbacks.** Works fully without an API key using a deterministic planner. If Gemini is configured but fails or returns an unusable plan, the built-in planner takes over and the UI says so. Storage durability is shown honestly ("temporary demo storage" vs Firestore).
-- **No arbitrary code.** The model can only choose from an allow-listed set of 17 tools; every name and parameter is validated. No `eval`/`exec`.
-- **Mobile-first.** Designed for a phone first: bottom navigation, sticky approval bar, 44 px touch targets, no horizontal scrolling from 320 px up.
+- **Approval is a security boundary, not just a button.** Every data-changing tool is held for approval on the server, whatever the planner or AI model says. A client cannot approve by sending `approved: true`. A replayed approval is rejected (409), as is one from another session (404) or one whose changes were altered after review (400). All three were checked against the live service.
+- **Verified results.** The app reports success only after the saved data is read back and matches what you approved.
+- **Honest fallbacks.** The app is fully usable without an API key. If Gemini is configured but fails or returns an unusable plan, the built-in planner takes over and the UI says so. The app also shows whether storage is durable (Firestore) or temporary.
+- **No arbitrary code.** Plans can use only an allow-listed set of 17 tools, and every tool name and parameter is validated. There is no `eval` or `exec`.
+- **Reliable execution.** Read steps get one retry; write steps are never retried automatically, and a step that already completed is not re-run when a workflow resumes. Each tool call has a timeout.
+- **Efficient storage access.** History and audit reads are bounded Firestore queries, schedule reads use a date-range query, and audit events are written in one batch. In tests with a fake Firestore client, round trips fell from 15 to 7 per plan and from 25 to 11 per approval.
 
 ## Architecture
 
@@ -79,7 +135,17 @@ flowchart LR
   ORC --> AUD[Audit trail + workflow history]
 ```
 
-Details: [docs/architecture.md](docs/architecture.md).
+In production, Gemini is disabled, so every plan comes from the deterministic planner. Details: [docs/architecture.md](docs/architecture.md).
+
+## Google Cloud services
+
+| Service | How it's used | Status |
+|---|---|---|
+| **Cloud Run** (gen2) | Hosts the single container (FastAPI serving the React build), scales to zero, max 1 instance | **Live**, revision `campuspilot-ai-00005-c5s` |
+| **Cloud Firestore** | Durable per-session storage for tasks, schedule, notes, preferences, workflow history and audit logs | **Live**, verified by read-back |
+| **Secret Manager** | Holds the session-signing secret | **Live** |
+| **Cloud Build + Artifact Registry** | Builds and stores the container image | Used for the live deployment |
+| **Gemini API** (`google-genai`) | Optional planner with strict JSON validation | Integrated and tested with mocks; **disabled in production** |
 
 ## Technology
 
@@ -90,7 +156,46 @@ Details: [docs/architecture.md](docs/architecture.md).
 | AI (optional) | Google Gemini (default `gemini-3.8-flash`, configurable) via `google-genai`, structured JSON output |
 | Storage (optional) | Google Cloud Firestore (`FIRESTORE_ENABLED=true`); in-memory by default |
 | Hosting | Docker image built with Cloud Build → Google Cloud Run (asia-south1, gen2, scale to zero); session secret in Secret Manager |
-| CI | GitHub Actions: backend tests + branch coverage + pyflakes, frontend lint + tests + coverage + build (no credentials, no deploy) |
+| CI | GitHub Actions: backend tests, branch coverage and pyflakes; frontend lint, tests, coverage and build (no credentials, no deploy) |
+
+## ✅ Verified live
+
+The public app at revision `campuspilot-ai-00005-c5s` was smoke-tested on 2026-10-09 with an automated headless-Chrome journey and scripted API requests. These checks passed:
+
+| Area | Checked on the live service |
+|---|---|
+| First visit | A session cookie is issued when the page loads, and parallel first requests share one session (no duplicate sessions) |
+| Full journey | Plan → approve → saved and verified → history → preferences → reject → clarification, at widths from 320 to 1440 px, with 0 browser console errors |
+| New planning features | A multi-exam plan and the "What I understood" panel |
+| Persistence | Approving the flagship plan saved exactly 2 schedule events and 1 task in Firestore; all 3 were read back and verified |
+| Approval security | Replay → 409; another session's approval → 404; altered changes → 400 with nothing saved; a client-sent `approved: true` does not bypass approval |
+| Rate limiting | 60 state-changing requests accepted, the next one rejected with 429 |
+| Transparency | Workflow history and audit log returned for the session |
+| Honest status | Status endpoint reports the deterministic planner, AI unavailable, and durable Firestore storage |
+| Hardening | API docs are disabled (`/openapi.json` → 404); no 5xx responses or error logs on this revision during the test |
+
+These checks show that the deployed safeguards work as designed. They are not a full security audit, and they do not mean the app is free of vulnerabilities. See [Security limitations](#security-limitations).
+
+## 🧪 Tests and quality
+
+| Check | Result |
+|---|---|
+| Backend tests | **312 passing** (1 optional live-Gemini test skipped). Includes 21 realistic planning scenarios, 36 security tests, and 15 Gemini tests that use a mocked SDK. |
+| Backend coverage (line + branch) | **86%** |
+| Frontend tests | **29 passing**; ESLint clean; production build succeeds |
+| Frontend coverage | 87.8% lines, 72.9% branches |
+| Accessibility (axe-core 4.10.3, run locally) | **0 violations** across 9 UI states at 390 px and 1440 px |
+| Keyboard-only journey (local) | **30/30** checks |
+| CI | GitHub Actions runs on every push; it passed on the deployed commit `e407c52` |
+
+```bash
+cd backend && ./.venv/bin/python -m unittest discover -s . -p "test_*.py"   # 312 tests (1 optional live test skipped)
+pip install -r requirements-dev.txt && python -m coverage run --branch -m unittest discover -s . -p "test_*.py" && python -m coverage report
+cd frontend && npm test && npm run lint && npm run build                   # 29 tests
+npm run test:coverage
+```
+
+Full results, including planner scenarios, browser, keyboard and accessibility checks: [docs/testing.md](docs/testing.md). CI workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ## Project structure
 
@@ -103,7 +208,7 @@ backend/
   services/               approvals, identity, persistence (memory/Firestore), memory, audit, gemini
   models/                 Pydantic models (agent, workflow, memory, audit)
   tools/                  tasks, schedule (conflicts, free slots), notes, memory tools
-  **/test_*.py            unittest suites (304 tests)
+  **/test_*.py            unittest suites (312 tests)
 frontend/
   src/App.jsx             app shell, plan/approve flow
   src/components/         UI components
@@ -119,17 +224,17 @@ Dockerfile, .dockerignore
 
 ## Assumptions
 
-- **Time zone.** Dates and times are interpreted in the server's local time zone ("today", "tomorrow" and the default 09:00–21:00 study window use the server clock). Times are stored without a time zone. Cloud Run containers run in UTC unless the `TZ` environment variable is set; the deployment guide sets `TZ=Asia/Kolkata`.
+- **Time zone.** Dates and times use the server's local time zone: "today", "tomorrow" and the default 09:00–21:00 study window follow the server clock. Times are stored without a time zone. The live service runs in India time (`TZ=Asia/Kolkata`); Cloud Run containers use UTC unless `TZ` is set.
 - **No calendar sync.** CampusPilot manages its own tasks, schedule and notes. It does not read from or write to Google Calendar or any other external app.
-- **Storage.** Data is kept in server memory and lost on restart unless Firestore is enabled (`FIRESTORE_ENABLED=true`). If Firestore is requested but fails to start, the app keeps running in memory and reports that storage is not durable.
+- **Storage.** Without Firestore (`FIRESTORE_ENABLED=true`), data is kept in server memory and lost on restart. The live service uses Firestore. If Firestore is requested but fails to start, the app keeps running in memory and reports that storage is not durable.
 - **Single instance.** Pending approvals and rate limits are held in process memory, so the service must run as one instance (`--max-instances=1` on Cloud Run).
-- **Anonymous sessions.** Each browser gets a private anonymous session (signed cookie). These are not user accounts: data does not follow the student to another device, and clearing cookies starts a new empty session.
-- **English goals.** The built-in planner recognises English phrasing. Other languages may only work when Gemini is configured, and that has not been tested.
-- **Approval.** Every change the assistant proposes (schedule, tasks, notes, preferences) requires explicit approval before it runs. Edits a student makes directly in the Preferences form are applied when they press Save, and resetting preferences requires a separate confirmation.
+- **Anonymous sessions.** Each browser gets a private anonymous session (signed cookie). These are not user accounts: data does not follow the student to another device, and clearing cookies starts a new, empty session.
+- **English goals.** The built-in planner recognises English phrasing. Other languages might work with Gemini configured, but this has not been tested.
+- **Approval.** Every change the assistant proposes (schedule, tasks, notes, preferences) requires explicit approval before it runs. Changes made directly in the Preferences form are applied when the student taps Save, and resetting preferences requires a separate confirmation.
 
 ## Setup and execution
 
-Prerequisites: Python 3.12, Node.js 20.19+ (or 22.12+), npm.
+Prerequisites: Python 3.12, Node.js 20.19+ (or 22.12+), npm. No API key or cloud account is needed to run locally.
 
 ```bash
 # Backend
@@ -158,7 +263,7 @@ All settings are environment variables; see [backend/.env.example](backend/.env.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | empty | Enables Gemini planning. Empty → built-in planner. |
+| `GEMINI_API_KEY` | empty | Enables Gemini planning. Empty → built-in planner. Not set in production. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Model name. `gemini-2.5-flash` is no longer available to new API users. |
 | `FIRESTORE_ENABLED` / `FIRESTORE_PROJECT_ID` | `false` / empty | Durable storage in Firestore. |
 | `IDENTITY_MODE` | `session` | `session` = private anonymous session per browser; `demo` = shared user (local only). |
@@ -173,27 +278,31 @@ The frontend has no secrets. `VITE_*` variables are public; leave `VITE_API_BASE
 
 ### Gemini (optional)
 
-1. Create a key in Google AI Studio.
-2. Put it in `backend/.env` as `GEMINI_API_KEY=...` (git-ignored) — never in frontend code or chat.
-3. Optionally set `GEMINI_MODEL` (default `gemini-3.8-flash`).
-4. Restart the backend. The header status panel shows "Planner: Gemini AI". A real request also needs available credits or free-tier quota on the key's Google AI Studio project; otherwise Google returns 402 and the app falls back to the built-in planner.
+**Production status: disabled.** The live service has no `GEMINI_API_KEY`, so it uses the built-in planner, and its status panel says so. Every feature described above works without Gemini.
 
-Gemini output is treated as untrusted: the response must match a strict schema (allowed fields, types, bounded sizes); tool names and parameters go through the same router validation and approval policy as the built-in planner; approval flags from the model are discarded. Timeouts, quota/auth errors and unusable output fall back to the built-in planner, and the plan is labelled "Built-in planner (AI fallback)" with the reason. The live Gemini integration has **not** been exercised (no valid key was available); it is covered by mocked tests, and an optional live test runs only with `CAMPUSPILOT_LIVE_GEMINI_TEST=1` and your own key.
+To try Gemini locally:
+
+1. Create a key in Google AI Studio.
+2. Put it in `backend/.env` as `GEMINI_API_KEY=...` (this file is git-ignored). Never put the key in frontend code or in chat.
+3. Optionally set `GEMINI_MODEL` (default `gemini-3.8-flash`).
+4. Restart the backend. The header status panel shows "Planner: Gemini AI".
+
+A real request also needs available credits or free-tier quota on the key's Google AI Studio project. Otherwise Google returns 402 and the app falls back to the built-in planner.
+
+Gemini output is treated as untrusted:
+- The response must match a strict schema: allowed fields, types and bounded sizes.
+- Tool names and parameters go through the same router validation and approval policy as the built-in planner.
+- Approval flags sent by the model are discarded.
+
+Timeouts, quota or authentication errors, and unusable output all fall back to the built-in planner. The plan is then labelled "Built-in planner (AI fallback)" with the reason.
+
+**A live Gemini call has not succeeded in this project.** The only key tried belongs to a Google AI Studio project with no prepaid credits, and its requests returned 402. The integration is covered by mocked tests. An optional live test runs only when `CAMPUSPILOT_LIVE_GEMINI_TEST=1` is set and your own key is configured.
 
 ### Firestore (optional)
 
-Set `FIRESTORE_ENABLED=true` and `FIRESTORE_PROJECT_ID`, with Application Default Credentials available (`gcloud auth application-default login` locally; the service account on Cloud Run). If Firestore fails to initialise, the app keeps running on memory and reports `memory_fallback` so nobody believes data is durable. Verified live on the deployed demo. History and audit reads are bounded queries (newest first, limited); schedule reads use a date-range query.
+Set `FIRESTORE_ENABLED=true` and `FIRESTORE_PROJECT_ID`, with Application Default Credentials available: `gcloud auth application-default login` locally, or the service account on Cloud Run. If Firestore fails to initialise, the app keeps running in memory and reports `memory_fallback`, so nobody believes data is durable.
 
-## Tests
-
-```bash
-cd backend && ./.venv/bin/python -m unittest discover -s . -p "test_*.py"   # 304 tests (1 optional live test skipped)
-pip install -r requirements-dev.txt && python -m coverage run --branch -m unittest discover -s . -p "test_*.py" && python -m coverage report
-cd frontend && npm test && npm run lint && npm run build                   # 29 tests
-npm run test:coverage
-```
-
-GitHub Actions runs the same checks on every push and pull request ([.github/workflows/ci.yml](.github/workflows/ci.yml)). See [docs/testing.md](docs/testing.md) for coverage, planner scenarios, browser, keyboard and accessibility results.
+Firestore is verified live on the deployed service. History and audit reads are bounded queries (newest first, limited), and schedule reads use a date-range query.
 
 ## Docker and Cloud Run
 
@@ -203,44 +312,43 @@ docker run --rm -p 8080:8080 campuspilot-ai:local
 curl http://localhost:8080/health
 ```
 
-Local Docker was not available, so `docker run` has not been tested locally; the same Dockerfile is built with Cloud Build for the live deployment. Deployment steps: [deployment/cloud-run.md](deployment/cloud-run.md).
-
-## Verification status
-
-| Capability | Status |
-|---|---|
-| Plan → approve → save → read-back verification, history, audit, replay/cross-session rejection, Secure cookie, docs disabled | **Verified live** (revision `campuspilot-ai-00004-gl8`) |
-| Firestore persistence | **Verified live** |
-| Session-cookie race fix | **Verified live** (cold start) |
-| Multi-day exam planning, "What I understood" panel, per-IP rate limit, bounded Firestore queries, batched audit writes | **Local tests + local browser only** until the next deployment |
-| Gemini planning | **Mocked tests only** — no valid key configured |
-| Accessibility | axe-core: 0 violations in 9 UI states; 30/30 keyboard-only checks; screen readers and real phones **not tested** |
-| `docker run` locally | **Not tested** (Docker unavailable); image builds on Cloud Build |
+`docker run` has not been tested locally because Docker was unavailable. The same Dockerfile is built with Cloud Build for the live deployment. Deployment steps: [deployment/cloud-run.md](deployment/cloud-run.md). Readiness and rollback: [docs/deployment.md](docs/deployment.md).
 
 ## Demo
 
 A 3-minute script that works with no API key: [docs/demo-script.md](docs/demo-script.md).
 
-## Screenshots
-
-No screenshots are committed yet. Capture them from the running app (see the demo script) before submission.
-
 ## Security limitations
 
-- **No account authentication.** Each browser gets a private anonymous session (signed HttpOnly cookie). This isolates visitors from each other, but data cannot follow you to another device, and clearing cookies starts over. A real login (e.g. Firebase Authentication) is needed before a public multi-user launch.
-- **Single instance.** Pending approvals and rate limits live in process memory; run one Cloud Run instance (`--max-instances=1`) until they move to shared storage.
-- **Rate limits are approximate.** They are per process and per IP/session; a determined attacker with many IPs can still create many anonymous sessions.
-- **Default storage is temporary.** In-memory data is lost on restart; the UI says so.
+- **No account login.** Each browser gets a private anonymous session (signed HttpOnly cookie). This keeps visitors' data separate, but data cannot follow you to another device, and clearing cookies starts over. A real login (for example, Firebase Authentication) is needed before a public multi-user launch.
+- **Single instance.** Pending approvals and rate limits are held in process memory, so the service runs as one Cloud Run instance (`--max-instances=1`) until they move to shared storage.
+- **Rate limits are approximate.** They are counted per process, per IP and per session. A determined attacker with many IP addresses can still create many anonymous sessions.
+- **Default storage is temporary.** In-memory data is lost on restart, and the UI says so. The live service uses Firestore.
 
-Full review: [docs/security.md](docs/security.md).
+The checks above were run and passed; they are not a guarantee that the app is secure. Full review: [docs/security.md](docs/security.md).
 
 ## Known limitations
 
-- Works with CampusPilot's own tasks, schedule and notes only — no Google Calendar or other external app integration.
-- Times are interpreted in the server's local time zone (no per-user time zones yet).
-- The deterministic planner understands common phrasings ("2 hours of DBMS", "DAA for 90 minutes", "meeting at 4 PM", "exam on Friday", "15 Oct"); unusual phrasing may need rewording or Gemini.
-- A meeting is assumed to last 1 hour and is placed on the planning day unless the goal gives its date (the plan states this assumption).
-- At most 12 study sessions are scheduled per plan.
+- **Anonymous browser sessions only.** There are no user accounts.
+- **Single Cloud Run instance** (`--max-instances=1`).
+- **India server time zone** (`TZ=Asia/Kolkata`). Times follow the server's time zone; there are no per-user time zones yet.
+- **No calendar sync.** CampusPilot works only with its own tasks, schedule and notes, with no Google Calendar or other external app integration.
+- **Gemini is disabled in production**, and a live Gemini call has not been verified.
+- **Not tested on real phones or with screen readers.** Mobile layout was checked in browser emulation; accessibility was checked with automated rules and keyboard-only testing.
+- **Common phrasing only.** The built-in planner understands common phrasings ("2 hours of DBMS", "DAA for 90 minutes", "meeting at 4 PM", "exam on Friday", "15 Oct"); unusual phrasing may need rewording.
+- **Meetings are assumed to last 1 hour** and are placed on the planning day unless the goal gives their date. The plan states this assumption.
+- **At most 12 study sessions** are scheduled per plan.
+- **`docker run` not tested locally** (the image builds on Cloud Build).
+
+## What's next
+
+These items are **not implemented** yet:
+- Real sign-in with Firebase Authentication.
+- A shared approval and rate-limit store so the service can run on more than one instance.
+- Per-user time zones.
+- Optional Google Calendar sync.
+- A verified live Gemini planner.
+- Testing with VoiceOver, TalkBack and real phones.
 
 ## License
 
