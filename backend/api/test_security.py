@@ -64,10 +64,6 @@ class TestSessionIsolation(SecurityTestBase):
 
     def test_page_load_issues_the_session_before_api_calls(self):
         """Regression: parallel first API calls must not each mint a different session."""
-        from main import FRONTEND_DIR
-
-        if not (FRONTEND_DIR / "index.html").is_file():
-            self.skipTest("frontend/dist not built")
         page = self.alice.get("/")
         self.assertIn(f"{SESSION_COOKIE_NAME}=", page.headers.get("set-cookie", ""))
         # Every API call after the page load reuses that session: no new cookies issued.
@@ -79,10 +75,6 @@ class TestSessionIsolation(SecurityTestBase):
     def test_concurrent_initial_requests_share_one_session(self):
         """Regression: after the page load, parallel first requests (as the SPA sends them) use one session."""
         from concurrent.futures import ThreadPoolExecutor
-        from main import FRONTEND_DIR
-
-        if not (FRONTEND_DIR / "index.html").is_file():
-            self.skipTest("frontend/dist not built")
         cookie = self.alice.get("/").cookies.get(SESSION_COOKIE_NAME)
         self.assertTrue(cookie)
 
@@ -330,6 +322,19 @@ class TestPlatformHardening(SecurityTestBase):
             res = self.alice.post("/api/agent/run", content=body, headers={"content-type": ctype})
             self.assertEqual(res.status_code, 422, ctype)
         self.assertEqual(self.alice.post("/api/agent/approve", content=b"approval_id=x", headers={"content-type": "application/x-www-form-urlencoded"}).status_code, 422)
+
+    def test_rate_limit_cannot_be_bypassed_by_dropping_the_cookie(self):
+        """Regression: cookie-less clients get a fresh session per request; the per-IP limit still applies."""
+        with patch.dict(os.environ, {"RATE_LIMIT_PER_MINUTE": "1000", "RATE_LIMIT_PER_IP_PER_MINUTE": "5"}):
+            codes = [TestClient(app).post("/api/agent/plan", json={"goal": "Show my tasks"}).status_code for _ in range(7)]
+        self.assertEqual(codes[:5], [200] * 5)
+        self.assertEqual(codes[5:], [429, 429])
+
+    def test_ip_limit_covers_reads_too(self):
+        with patch.dict(os.environ, {"RATE_LIMIT_PER_IP_PER_MINUTE": "3"}):
+            codes = [TestClient(app).get("/api/agent/memory").status_code for _ in range(4)]
+        self.assertEqual(codes, [200, 200, 200, 429])
+        self.assertEqual(TestClient(app).get("/health").status_code, 200)  # non-API routes unaffected
 
     def test_security_headers(self):
         res = self.alice.get("/api/agent/status")

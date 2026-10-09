@@ -133,6 +133,39 @@ describe("plan and approval", () => {
   });
 });
 
+describe("explanations", () => {
+  it("shows what the planner understood, with sources and assumptions", async () => {
+    const user = userEvent.setup();
+    await planFlagship(user);
+    const panel = screen.getByText("What I understood").closest("details");
+    expect(within(panel).getByText("DBMS study time")).toBeTruthy();
+    expect(within(panel).getByText("you said")).toBeTruthy();
+    expect(within(panel).getByText("saved preference")).toBeTruthy();
+    expect(within(panel).getByText("default")).toBeTruthy();
+    expect(within(panel).getByText(/kept 1 hour free/)).toBeTruthy();
+    expect(screen.getByText("Built-in planner")).toBeTruthy();
+  });
+
+  it("labels an AI fallback honestly", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.runAgent).mockResolvedValue({
+      ...FLAGSHIP_RESULT_WAITING,
+      planner_mode: "deterministic_fallback",
+      planner_note: "AI planning is unavailable right now, so CampusPilot's built-in planner was used instead.",
+    });
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /Plan tomorrow's study \(demo\)/ }));
+    await user.click(screen.getByRole("button", { name: /Plan it/ }));
+    expect(await screen.findByText("Built-in planner (AI fallback)")).toBeTruthy();
+    expect(screen.getByText(/AI planning is unavailable right now/)).toBeTruthy();
+  });
+
+  it("has exactly one level-one heading", () => {
+    render(<App />);
+    expect(screen.getAllByRole("heading", { level: 1 }).map((h) => h.textContent)).toEqual(["CampusPilot AI"]);
+  });
+});
+
 describe("preferences", () => {
   it("validates edits client-side before saving", async () => {
     const user = userEvent.setup();
@@ -178,5 +211,58 @@ describe("navigation and status", () => {
     await user.click(await screen.findByRole("button", { name: /show system status/ }));
     expect(screen.getByText("Built-in planner")).toBeTruthy();
     expect(screen.getByText("Temporary")).toBeTruthy();
+  });
+});
+
+describe("history, read results, saving and offline states", () => {
+  it("shows workflow history and the audit log", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getWorkflows).mockResolvedValue([{ ...FLAGSHIP_RESULT_DONE.workflow, updated_at: new Date().toISOString() }]);
+    vi.mocked(api.getAuditLog).mockResolvedValue([
+      { id: "a1", event_type: "approval_granted", timestamp: new Date().toISOString(), tool: null, error_summary: null },
+      { id: "a2", event_type: "tool_failed", timestamp: new Date().toISOString(), tool: "create_task", error_summary: "storage down" },
+    ]);
+    render(<App />);
+    const activity = await screen.findByRole("heading", { name: "Activity" });
+    const card = activity.closest("section");
+    expect(await within(card).findByText(/Organize my preparation/)).toBeTruthy();
+    expect(within(card).getByText("3/3 actions done")).toBeTruthy();
+    await user.click(within(card).getByText(/Detailed audit log \(2\)/));
+    expect(within(card).getByText("You approved changes")).toBeTruthy();
+    expect(within(card).getByText("storage down")).toBeTruthy();
+  });
+
+  it("shows the data a read-only goal found", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.runAgent).mockResolvedValue({
+      goal: "Show my tasks", status: "completed", plan: { goal: "Show my tasks", summary: "Plan to retrieve user tasks", tasks: [] },
+      results: [], approval_requests: [], planner_mode: "deterministic",
+      workflow: { workflow_id: "w2", status: "completed", next_action: "All steps finished. No data was changed.", steps: [
+        { step_id: "r1", title: "Retrieve tasks", kind: "read", tool: "get_tasks", status: "completed", verification: {},
+          result: { tasks: [{ title: "Submit DAA assignment", status: "pending", priority: "high" }] } },
+      ] },
+    });
+    render(<App />);
+    await user.type(screen.getByRole("textbox", { name: /What do you want to get done/ }), "Show my tasks");
+    await user.click(screen.getByRole("button", { name: /Plan it/ }));
+    expect(await screen.findByText("Submit DAA assignment")).toBeTruthy();
+    expect(screen.getByText("pending · high priority")).toBeTruthy();
+    expect(screen.queryByText(/What was saved/)).toBeNull();
+  });
+
+  it("saves preferences and reports verified, temporary storage honestly", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.savePreferences).mockResolvedValue({ ...PREFS, durable: false, verified: true });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /^Edit$/ }));
+    await user.click(screen.getByRole("button", { name: /Save preferences/ }));
+    expect(await screen.findByText(/Saved and verified in temporary demo storage/)).toBeTruthy();
+    expect(api.savePreferences).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains when the server cannot be reached", async () => {
+    vi.mocked(api.getAgentStatus).mockRejectedValue(new api.ApiError("down", { kind: "network" }));
+    render(<App />);
+    expect(await screen.findByText("Can't reach the CampusPilot server")).toBeTruthy();
   });
 });

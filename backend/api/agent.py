@@ -6,48 +6,26 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-try:
-    from agent.orchestrator import AgentOrchestrator
-    from agent.planner import PlannerError
-    from agent.router import route_tool
-    from models.agent import (
-        AgentExecutionResult,
-        AgentPlan,
-        AgentTask,
-        ApprovalRequest,
-        ApprovalResponse,
-        ToolResult,
-        UserGoal,
-    )
-    from models.audit import AuditLogEntry
-    from models.memory import StudentPreferences, StudentPreferencesUpdate
-    from models.workflow import WorkflowRecord
-    from services.approvals import ApprovalError, StagedApproval, approval_store
-    from services.audit import AuditService
-    from services.identity import current_user_id, get_identity_mode
-    from services.memory import MemoryService
-    from services.persistence import get_persistence, get_persistence_status
-except ImportError:
-    from backend.agent.orchestrator import AgentOrchestrator
-    from backend.agent.planner import PlannerError
-    from backend.agent.router import route_tool
-    from backend.models.agent import (
-        AgentExecutionResult,
-        AgentPlan,
-        AgentTask,
-        ApprovalRequest,
-        ApprovalResponse,
-        ToolResult,
-        UserGoal,
-    )
-    from backend.models.audit import AuditLogEntry
-    from backend.models.memory import StudentPreferences, StudentPreferencesUpdate
-    from backend.models.workflow import WorkflowRecord
-    from backend.services.approvals import ApprovalError, StagedApproval, approval_store
-    from backend.services.audit import AuditService
-    from backend.services.identity import current_user_id, get_identity_mode
-    from backend.services.memory import MemoryService
-    from backend.services.persistence import get_persistence, get_persistence_status
+from agent.orchestrator import AgentOrchestrator
+from agent.planner import PlannerError
+from agent.router import route_tool
+from models.agent import (
+    AgentExecutionResult,
+    AgentPlan,
+    AgentTask,
+    ApprovalRequest,
+    ApprovalResponse,
+    ToolResult,
+    UserGoal,
+)
+from models.audit import AuditLogEntry
+from models.memory import StudentPreferences, StudentPreferencesUpdate
+from models.workflow import WorkflowRecord
+from services.approvals import ApprovalError, StagedApproval, approval_store
+from services.audit import AuditService
+from services.identity import current_user_id, get_identity_mode
+from services.memory import MemoryService
+from services.persistence import get_persistence, get_persistence_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -72,10 +50,7 @@ def get_gemini_service_safe() -> Any | None:
     Never exposes secrets or raises. The client is cached per key/model.
     """
     try:
-        try:
-            from services.gemini import create_gemini_service
-        except ImportError:
-            from backend.services.gemini import create_gemini_service
+        from services.gemini import create_gemini_service
         key = os.getenv("GEMINI_API_KEY", "").strip()
         model = os.getenv("GEMINI_MODEL", "").strip()
         cache_key = (hashlib.sha256(key.encode("utf-8")).hexdigest(), model)
@@ -383,7 +358,7 @@ def approve_action(
 
     workflow = staged.workflow
     events: list[dict] = []
-    orchestrator._event(events, "approval_granted", workflow, detail=f"{len(staged.protected_step_ids)} action(s)")
+    orchestrator.log_event(events, "approval_granted", workflow, detail=f"{len(staged.protected_step_ids)} action(s)")
     try:
         results = orchestrator.run_workflow(staged.plan, workflow, approved=True, user_id=user_id, events=events)
     except Exception:
@@ -399,7 +374,7 @@ def approve_action(
         "failed": "workflow_failed",
     }
     if workflow.status in terminal:
-        orchestrator._event(events, terminal[workflow.status], workflow)
+        orchestrator.log_event(events, terminal[workflow.status], workflow)
     orchestrator.flush_events(events, user_id)
     _save_workflow(workflow, user_id)
 
@@ -463,7 +438,7 @@ def reject_action(payload: RejectActionRequest) -> ApprovalResponse:
 
     orchestrator = AgentOrchestrator()
     events: list[dict] = []
-    orchestrator._event(events, "approval_rejected", workflow, status="rejected")
+    orchestrator.log_event(events, "approval_rejected", workflow, status="rejected")
     orchestrator.flush_events(events, user_id)
     _save_workflow(workflow, user_id)
 
@@ -678,7 +653,7 @@ def get_memory() -> MemoryResponse:
     service = MemoryService()
     try:
         pref = service.get_preferences()
-        summary = service.get_memory_summary()
+        summary = service.get_memory_summary(preferences=pref)
     except Exception:
         raise HTTPException(status_code=503, detail="Preferences could not be loaded. Storage is unavailable.")
     storage = get_persistence_status()
@@ -795,7 +770,7 @@ def update_memory_endpoint(payload: MemoryUpdateRequest) -> Any:
     storage = get_persistence_status()
     return MemoryResponse(
         preferences=updated.model_dump(),
-        summary=service.get_memory_summary(),
+        summary=service.get_memory_summary(preferences=saved),
         status="ok",
         durable=storage["durable"],
         storage_message=storage["message"],
@@ -836,7 +811,7 @@ def reset_memory_endpoint(payload: MemoryResetRequest) -> MemoryResetResponse:
         status="ok",
         message="Student preferences successfully reset to defaults.",
         preferences=reset_pref.model_dump(),
-        summary=service.get_memory_summary(),
+        summary=service.get_memory_summary(preferences=saved),
         verified=True,
         durable=get_persistence_status()["durable"],
     )

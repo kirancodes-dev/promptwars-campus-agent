@@ -24,12 +24,8 @@ import secrets
 import threading
 from typing import Any
 
-try:
-    from models.agent import AgentPlan, ApprovalRequest
-    from models.workflow import WorkflowRecord
-except ImportError:
-    from backend.models.agent import AgentPlan, ApprovalRequest
-    from backend.models.workflow import WorkflowRecord
+from models.agent import AgentPlan, ApprovalRequest
+from models.workflow import WorkflowRecord
 
 MAX_PENDING_PER_USER = 20
 

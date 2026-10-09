@@ -26,10 +26,7 @@ import os
 import re
 import secrets
 
-try:
-    from services.persistence import DEFAULT_USER_ID
-except ImportError:
-    from backend.services.persistence import DEFAULT_USER_ID
+from services.persistence import DEFAULT_USER_ID
 
 logger = logging.getLogger(__name__)
 

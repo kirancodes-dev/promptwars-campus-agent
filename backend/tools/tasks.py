@@ -1,22 +1,12 @@
 from typing import Any
 import uuid
 
-try:
-    from models.agent import AgentTask, TaskStatus
-    from services.identity import current_user_id
-    from services.persistence import (
-        DEFAULT_USER_ID,
-        EntityNotFoundError,
-        get_persistence,
-    )
-except ImportError:
-    from backend.models.agent import AgentTask, TaskStatus
-    from backend.services.identity import current_user_id
-    from backend.services.persistence import (
-        DEFAULT_USER_ID,
-        EntityNotFoundError,
-        get_persistence,
-    )
+from models.agent import AgentTask
+from services.identity import current_user_id
+from services.persistence import (
+    EntityNotFoundError,
+    get_persistence,
+)
 
 
 class TaskNotFoundError(KeyError):

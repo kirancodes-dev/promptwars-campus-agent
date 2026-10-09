@@ -6,40 +6,22 @@ import os
 from typing import Any, Callable
 import uuid
 
-try:
-    from agent.executor import execute_tool
-    from agent.planner import PlannerError, plan_goal, plan_goal_with_gemini
-    from agent.router import get_tool, tool_mutates
-    from agent.workflow import validate_plan_dependencies, verify_tool_execution
-    from models.agent import (
-        AgentExecutionResult,
-        AgentPlan,
-        AgentTask,
-        ExecutionStatus,
-        ToolCall,
-        ToolResult,
-        UserGoal,
-    )
-    from models.workflow import WorkflowRecord, WorkflowStep
-    from services.audit import AuditService
-    from services.identity import current_user_id
-except ImportError:
-    from backend.agent.executor import execute_tool
-    from backend.agent.planner import PlannerError, plan_goal, plan_goal_with_gemini
-    from backend.agent.router import get_tool, tool_mutates
-    from backend.agent.workflow import validate_plan_dependencies, verify_tool_execution
-    from backend.models.agent import (
-        AgentExecutionResult,
-        AgentPlan,
-        AgentTask,
-        ExecutionStatus,
-        ToolCall,
-        ToolResult,
-        UserGoal,
-    )
-    from backend.models.workflow import WorkflowRecord, WorkflowStep
-    from backend.services.audit import AuditService
-    from backend.services.identity import current_user_id
+from agent.executor import execute_tool
+from agent.planner import PlannerError, plan_goal, plan_goal_with_gemini
+from agent.router import get_tool, tool_mutates
+from agent.workflow import validate_plan_dependencies, verify_tool_execution
+from models.agent import (
+    AgentExecutionResult,
+    AgentPlan,
+    AgentTask,
+    ExecutionStatus,
+    ToolCall,
+    ToolResult,
+    UserGoal,
+)
+from models.workflow import WorkflowRecord, WorkflowStep
+from services.audit import AuditService
+from services.identity import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +31,15 @@ FALLBACK_NOTE = (
     "AI planning was unavailable or returned an unusable plan, "
     "so CampusPilot's built-in planner was used instead."
 )
+FALLBACK_NOTES = {
+    "unavailable": (
+        "AI planning is unavailable right now (the AI service did not respond in time or rejected the request), "
+        "so CampusPilot's built-in planner was used instead."
+    ),
+    "invalid_output": (
+        "The AI's plan failed CampusPilot's safety checks, so it was discarded and the built-in planner was used instead."
+    ),
+}
 
 
 def _tool_timeout_seconds() -> float:
@@ -95,14 +86,15 @@ class AgentOrchestrator:
                 plan = plan_goal_with_gemini(goal, self.gemini_service)
                 valid, _ = validate_plan_dependencies(plan)
                 if not valid:
-                    raise PlannerError("Gemini plan failed dependency validation.")
+                    raise PlannerError("Gemini plan failed dependency validation.", reason="invalid_output")
                 self.last_planner_mode = "gemini"
                 return plan
             except (PlannerError, ValueError, TypeError, KeyError) as e:
                 # Model output is untrusted: never surface it, fall back deterministically.
-                logger.warning("Gemini planning unavailable (%s); using deterministic planner.", type(e).__name__)
+                reason = getattr(e, "reason", "invalid_output")
+                logger.warning("Gemini planning fallback (%s, %s); using deterministic planner.", reason, type(e).__name__)
                 self.last_planner_mode = "deterministic_fallback"
-                self.last_planner_note = FALLBACK_NOTE
+                self.last_planner_note = FALLBACK_NOTES.get(reason, FALLBACK_NOTE)
                 return plan_goal(goal)
 
         self.last_planner_mode = "deterministic"
@@ -202,7 +194,7 @@ class AgentOrchestrator:
     def _audit(self) -> AuditService:
         return self._audit_service or AuditService()
 
-    def _event(self, events: list[dict], event_type: str, wf: WorkflowRecord, step: WorkflowStep | None = None, detail: str | None = None, status: str | None = None) -> None:
+    def log_event(self, events: list[dict], event_type: str, wf: WorkflowRecord, step: WorkflowStep | None = None, detail: str | None = None, status: str | None = None) -> None:
         events.append(
             {
                 "event_type": event_type,
@@ -220,9 +212,7 @@ class AgentOrchestrator:
         if not events:
             return True
         try:
-            service = self._audit()
-            for ev in events:
-                service.record_event(user_id=user_id, **ev)
+            self._audit().record_events(events, user_id=user_id)
             return True
         except Exception as e:
             logger.warning("Audit logging failed (%s); workflow result unaffected.", type(e).__name__)
@@ -298,102 +288,93 @@ class AgentOrchestrator:
             step = steps_by_id.get(task.id)
             if step is None:
                 continue
-
-            # Dependency gate
-            pending_dep = None
-            failed_dep = None
-            for dep_id in task.depends_on:
-                dep = steps_by_id.get(dep_id)
-                if dep is None:
-                    failed_dep = dep_id
-                    break
-                if dep.status in ("waiting_approval", "planned"):
-                    pending_dep = dep_id
-                elif dep.status != "completed":
-                    failed_dep = dep_id
-                    break
-
+            pending_dep, failed_dep = self._dependency_gate(task, steps_by_id)
             if failed_dep is not None:
-                step.status = "blocked"
-                dep_title = steps_by_id[failed_dep].title if failed_dep in steps_by_id else failed_dep
-                step.error = f"Prerequisite step '{dep_title}' did not complete. Aborting execution of dependent task."
-                if task.tool:
-                    results.append(ToolResult(tool_name=task.tool, success=False, result=None, error=step.error))
-                self._event(events, "step_blocked", workflow, step, detail=step.error)
-                continue
-
-            if not task.tool:
+                self._block(task, step, steps_by_id.get(failed_dep), failed_dep, results, workflow, events)
+            elif not task.tool:
                 # Reasoning step: completes once its prerequisites are done.
                 step.status = "planned" if pending_dep else "completed"
-                continue
-
-            if step.kind == "write" and step.status == "completed":
+            elif step.kind == "write" and step.status == "completed":
                 # Idempotent resume: never repeat a write that already succeeded.
                 results.append(ToolResult(tool_name=task.tool, success=True, result=step.result))
-                continue
-
-            if pending_dep is not None and not approved:
-                # Only protected steps "need approval"; others simply wait for them.
-                step.status = "waiting_approval" if step.requires_approval else "planned"
-                if step.requires_approval:
-                    results.append(
-                        ToolResult(tool_name=task.tool, success=False, result={"requires_approval": True}, error=APPROVAL_REQUIRED_ERROR)
-                    )
-                else:
-                    results.append(
-                        ToolResult(tool_name=task.tool, success=False, result=None, error="Waiting for an approved prerequisite step.")
-                    )
-                continue
-
-            step.status = "running"
-            step.started_at = datetime.now()
-            self._event(events, "step_started", workflow, step)
-            res = self._run_step(task, step, approved)
-
-            if step.requires_approval and not approved:
-                # Defense in depth: whatever the executor answered, an unapproved
-                # protected step is reported as waiting, never as done.
-                if res.success:
-                    logger.error("Executor reported success for an unapproved protected step '%s'.", task.tool)
-                res = ToolResult(tool_name=task.tool, success=False, result={"requires_approval": True}, error=APPROVAL_REQUIRED_ERROR)
-                step.status = "waiting_approval"
-                step.finished_at = None
-                self._event(events, "approval_requested", workflow, step)
-                results.append(res)
-                continue
-
-            if res.success and step.kind == "write":
-                verified, v_err = verify_tool_execution(task.tool, task.parameters, res, user_id=user_id)
-                step.verification.checked = True
-                step.verification.passed = verified
-                step.verification.detail = None if verified else (v_err or "Verification failed.")
-                self._event(
-                    events,
-                    "verification_succeeded" if verified else "verification_failed",
-                    workflow,
-                    step,
-                    detail=step.verification.detail,
-                )
-                if not verified:
-                    res = ToolResult(tool_name=task.tool, success=False, result=res.result, error=v_err or "Verification failed.")
-
-            step.finished_at = datetime.now()
-            step.result = res.result
-            step.error = res.error
-            step.status = "completed" if res.success else "failed"
-            self._event(
-                events,
-                "tool_succeeded" if res.success else "tool_failed",
-                workflow,
-                step,
-                detail=None if res.success else res.error,
-            )
-            results.append(res)
+            elif pending_dep is not None and not approved:
+                results.append(self._wait(task, step))
+            else:
+                results.append(self._execute(task, step, approved, user_id, workflow, events))
 
         workflow.status = self._workflow_status(workflow)
         workflow.next_action = self._next_action(workflow)
         workflow.updated_at = datetime.now()
         return results
+
+    @staticmethod
+    def _dependency_gate(task: AgentTask, steps_by_id: dict[str, WorkflowStep]) -> tuple[str | None, str | None]:
+        """Return (pending dependency, failed dependency). A failed or unknown dependency wins."""
+        pending = None
+        for dep_id in task.depends_on:
+            dep = steps_by_id.get(dep_id)
+            if dep is None or dep.status not in ("completed", "waiting_approval", "planned"):
+                return pending, dep_id
+            if dep.status != "completed":
+                pending = dep_id
+        return pending, None
+
+    def _block(self, task: AgentTask, step: WorkflowStep, dep: WorkflowStep | None, dep_id: str,
+               results: list[ToolResult], workflow: WorkflowRecord, events: list[dict]) -> None:
+        step.status = "blocked"
+        step.error = f"Prerequisite step '{dep.title if dep else dep_id}' did not complete. Aborting execution of dependent task."
+        if task.tool:
+            results.append(ToolResult(tool_name=task.tool, success=False, result=None, error=step.error))
+        self.log_event(events, "step_blocked", workflow, step, detail=step.error)
+
+    @staticmethod
+    def _wait(task: AgentTask, step: WorkflowStep) -> ToolResult:
+        # Only protected steps "need approval"; others simply wait for them.
+        if step.requires_approval:
+            step.status = "waiting_approval"
+            return ToolResult(tool_name=task.tool, success=False, result={"requires_approval": True}, error=APPROVAL_REQUIRED_ERROR)
+        step.status = "planned"
+        return ToolResult(tool_name=task.tool, success=False, result=None, error="Waiting for an approved prerequisite step.")
+
+    def _execute(self, task: AgentTask, step: WorkflowStep, approved: bool, user_id: str,
+                 workflow: WorkflowRecord, events: list[dict]) -> ToolResult:
+        step.status = "running"
+        step.started_at = datetime.now()
+        self.log_event(events, "step_started", workflow, step)
+        res = self._run_step(task, step, approved)
+
+        if step.requires_approval and not approved:
+            # Defense in depth: whatever the executor answered, an unapproved
+            # protected step is reported as waiting, never as done.
+            if res.success:
+                logger.error("Executor reported success for an unapproved protected step '%s'.", task.tool)
+            step.status = "waiting_approval"
+            step.finished_at = None
+            self.log_event(events, "approval_requested", workflow, step)
+            return ToolResult(tool_name=task.tool, success=False, result={"requires_approval": True}, error=APPROVAL_REQUIRED_ERROR)
+
+        if res.success and step.kind == "write":
+            res = self._verify(task, step, res, user_id, workflow, events)
+
+        step.finished_at = datetime.now()
+        step.result = res.result
+        step.error = res.error
+        step.status = "completed" if res.success else "failed"
+        self.log_event(events, "tool_succeeded" if res.success else "tool_failed", workflow, step,
+                       detail=None if res.success else res.error)
+        return res
+
+    def _verify(self, task: AgentTask, step: WorkflowStep, res: ToolResult, user_id: str,
+                workflow: WorkflowRecord, events: list[dict]) -> ToolResult:
+        verified, v_err = verify_tool_execution(task.tool, task.parameters, res, user_id=user_id)
+        step.verification.checked = True
+        step.verification.passed = verified
+        step.verification.detail = None if verified else (v_err or "Verification failed.")
+        self.log_event(events, "verification_succeeded" if verified else "verification_failed", workflow, step,
+                       detail=step.verification.detail)
+        if verified:
+            return res
+        return ToolResult(tool_name=task.tool, success=False, result=res.result, error=v_err or "Verification failed.")
 
     @staticmethod
     def _workflow_status(wf: WorkflowRecord) -> str:
@@ -523,14 +504,14 @@ class AgentOrchestrator:
 
         plan = self._plan_goal(goal)
         workflow = self.build_workflow(goal.goal, plan)
-        self._event(events, "workflow_started", workflow, detail=f"planner={workflow.planner_mode}")
+        self.log_event(events, "workflow_started", workflow, detail=f"planner={workflow.planner_mode}")
 
         valid, err = validate_plan_dependencies(plan)
         if not valid:
             res = ToolResult(tool_name="dependency_validation", success=False, error=err)
             workflow.status = "failed"
             workflow.next_action = "The plan was rejected before anything ran. Try rephrasing your goal."
-            self._event(events, "workflow_failed", workflow, detail=err)
+            self.log_event(events, "workflow_failed", workflow, detail=err)
             self.flush_events(events, user_id)
             result = AgentExecutionResult(
                 goal=goal.goal,
@@ -552,7 +533,7 @@ class AgentOrchestrator:
             workflow.next_action = "Answer the question by adding the missing detail to your goal, then run it again."
             for s in workflow.steps:
                 s.status = "skipped"
-            self._event(events, "clarification_requested", workflow, detail=question)
+            self.log_event(events, "clarification_requested", workflow, detail=question)
             self.flush_events(events, user_id)
             return AgentExecutionResult(
                 goal=goal.goal,
@@ -574,7 +555,7 @@ class AgentOrchestrator:
             "failed": "workflow_failed",
         }
         if workflow.status in terminal:
-            self._event(events, terminal[workflow.status], workflow)
+            self.log_event(events, terminal[workflow.status], workflow)
         self.flush_events(events, user_id)
 
         result = self.build_result(goal.goal, plan, workflow, results, plan_requires_approval)

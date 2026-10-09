@@ -1,34 +1,19 @@
 import unittest
 from unittest.mock import MagicMock
 
-try:
-    from agent.orchestrator import AgentOrchestrator
-    from agent.router import _TOOL_REGISTRY
-    from models.agent import (
-        AgentExecutionResult,
-        AgentPlan,
-        AgentTask,
-        ToolCall,
-        ToolResult,
-        UserGoal,
-    )
-    from tools.notes import _notes
-    from tools.schedule import _events
-    from tools.tasks import _tasks, create_task
-except ImportError:
-    from backend.agent.orchestrator import AgentOrchestrator
-    from backend.agent.router import _TOOL_REGISTRY
-    from backend.models.agent import (
-        AgentExecutionResult,
-        AgentPlan,
-        AgentTask,
-        ToolCall,
-        ToolResult,
-        UserGoal,
-    )
-    from backend.tools.notes import _notes
-    from backend.tools.schedule import _events
-    from backend.tools.tasks import _tasks, create_task
+from agent.orchestrator import AgentOrchestrator
+from agent.router import _TOOL_REGISTRY
+from models.agent import (
+    AgentExecutionResult,
+    AgentPlan,
+    AgentTask,
+    ToolCall,
+    ToolResult,
+    UserGoal,
+)
+from tools.notes import _notes
+from tools.schedule import _events
+from tools.tasks import _tasks, create_task
 
 
 class TestAgentOrchestrator(unittest.TestCase):

@@ -6,8 +6,8 @@
 
 **Tagline:** The study planner that asks before it acts — and proves what it did.
 
-**Repository:** https://github.com/kirancodes-dev/promptwars-campus-agent (not yet pushed)
-**Live demo:** [not deployed — add Cloud Run URL after deployment]
+**Repository:** https://github.com/kirancodes-dev/promptwars-campus-agent
+**Live demo:** https://campuspilot-ai-165103643932.asia-south1.run.app
 **Demo video:** [add link]
 
 ## Problem
@@ -37,8 +37,8 @@ React 19 + Vite + Tailwind SPA → FastAPI (session middleware, rate limits, sec
 ## Google technology
 
 - **Gemini 2.5 Flash** (`google-genai`, JSON mode) for planning, behind strict validation with a deterministic fallback. *Integrated and tested with mocks; not exercised against the live API in this repository.*
-- **Cloud Firestore** for optional durable per-user storage. *Adapter tested with a mocked client; not verified live.*
-- **Cloud Run + Secret Manager + Artifact Registry/Cloud Build** deployment path documented in `deployment/cloud-run.md`. *Not deployed.*
+- **Cloud Firestore** for durable per-session storage, with bounded queries and batched audit writes. *Verified live on the demo deployment.*
+- **Cloud Run (gen2) + Secret Manager + Artifact Registry/Cloud Build**: live demo in asia-south1, scale to zero, one instance. Steps in `deployment/cloud-run.md`.
 
 ## Security and human control
 
@@ -50,15 +50,17 @@ Server-enforced approval policy; approval replay, tampering, expiry and cross-se
 - Deterministic planner that parses arbitrary subjects/durations and allocates conflict-free, preference-aware slots.
 - Chained intents: "remember my preference, then plan" under one approval.
 
-## Testing evidence (2026-10-09, local)
+## Testing evidence (2026-10-09)
 
-- Backend: 251 unittest tests passing (including 40 workflow and 28 security tests).
-- Frontend: 21 Vitest/Testing Library tests passing; ESLint clean; production build succeeds.
-- Headless Chrome: 0 px horizontal overflow and 0 console errors at 320–1440 px; full phone journey (plan → approve → verify → activity → preferences → reset → reject → clarification).
+- Backend: 304 automated tests (1 optional live-Gemini test skipped without a key), 86% line+branch coverage — including 21 realistic planning scenarios, 35 security tests and 9 mocked Gemini failure/abuse tests.
+- Frontend: 29 tests (88% line coverage), ESLint clean, production build succeeds.
+- Accessibility: axe-core 0 violations across 9 UI states; 30/30 keyboard-only checks; no horizontal scroll from 320 px or at 200% text size. Not tested with screen readers or real phones.
+- Live (Cloud Run + Firestore, revision 00004): plan → approve → read-back verification, replay/cross-session rejection, Secure cookie, no API docs — verified. Newer features (multi-day exam planning, "What I understood") are tested locally and will be live after the next deployment.
+- CI: GitHub Actions runs the same checks on every push.
 
 ## Known limitations
 
-No account authentication; single-instance requirement; temporary storage by default; server-local time zone; no external calendar integration; Gemini and Firestore not verified live; Docker image not yet built.
+No account authentication (anonymous sessions); single-instance requirement; server-local time zone (set to India for the demo); no external calendar integration; Gemini not verified live (no valid key); `docker run` not tested locally (the image builds on Cloud Build); screen readers and real phones not tested.
 
 ## Demo instructions
 

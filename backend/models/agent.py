@@ -37,11 +37,28 @@ class AgentTask(BaseModel):
     depends_on: list[str] = Field(default_factory=list, description="IDs of tasks that must execute before this task")
 
 
+FactSource = Literal["you said", "saved preference", "default", "inferred"]
+
+
+class PlanFact(BaseModel):
+    """One thing the planner understood, and where it came from."""
+
+    label: str = Field(..., description="What the fact is about, e.g. 'DBMS study time'")
+    value: str = Field(..., description="Human-readable value, e.g. '2 hours'")
+    source: FactSource = Field(..., description="you said | saved preference | default | inferred")
+
+
 class AgentPlan(BaseModel):
     goal: str = Field(..., description="User goal this plan aims to achieve")
     summary: str = Field(..., description="High-level summary of the execution plan")
     tasks: list[AgentTask] = Field(default_factory=list, description="Ordered list of agent tasks")
     requires_approval: bool = Field(default=False, description="Whether any task in the plan requires human approval")
+    understanding: list[PlanFact] = Field(
+        default_factory=list, description="Facts the planner used, each labelled with its source"
+    )
+    assumptions: list[str] = Field(
+        default_factory=list, description="Assumptions the planner made where the goal did not say"
+    )
 
 
 class ToolCall(BaseModel):

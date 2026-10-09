@@ -83,6 +83,14 @@ gcloud firestore databases create --location="${REGION}" --type=firestore-native
 
 Data is stored under `users/{session-id}/...`. Only the server's service account accesses Firestore; no client SDK is used.
 
+## 6b. Firestore security rules (recommended)
+
+The app never accesses Firestore from the browser; only the runtime service account (IAM) does. A database with no rules already denies client access; deploying the repository's explicit deny-all rules documents that intent. Requires the Firebase CLI logged in to your account:
+
+```bash
+firebase deploy --only firestore:rules --project "${PROJECT_ID}"   # uses firebase.json + firestore.rules
+```
+
 ## 7. Build the image 💳 (Cloud Build) — or locally
 
 ```bash

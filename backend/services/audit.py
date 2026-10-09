@@ -1,18 +1,11 @@
 import re
 import uuid
 from datetime import datetime
-from typing import Any
 
-try:
-    from models.agent import AgentPlan, ToolResult
-    from models.audit import AuditLogEntry
-    from services.identity import current_user_id
-    from services.persistence import DEFAULT_USER_ID, BasePersistence, get_persistence
-except ImportError:
-    from backend.models.agent import AgentPlan, ToolResult
-    from backend.models.audit import AuditLogEntry
-    from backend.services.identity import current_user_id
-    from backend.services.persistence import DEFAULT_USER_ID, BasePersistence, get_persistence
+from models.agent import AgentPlan, ToolResult
+from models.audit import AuditLogEntry
+from services.identity import current_user_id
+from services.persistence import BasePersistence, get_persistence
 
 _SENSITIVE_PATTERNS = [
     re.compile(r"AIza[0-9A-Za-z-_]{35}"),
@@ -71,30 +64,26 @@ class AuditService:
         )
         return self.persistence.record_audit_log(entry, user_id=user_id)
 
-    def record_event(
+    def _event_entry(
         self,
         event_type: str,
+        user_id: str,
         workflow_id: str | None = None,
         step_id: str | None = None,
         tool: str | None = None,
         status: str | None = None,
         detail: str | None = None,
         goal: str | None = None,
-        user_id: str | None = None,
     ) -> AuditLogEntry:
-        """
-        Record a single workflow lifecycle event (workflow_started, step_started,
-        approval_granted, tool_failed, verification_succeeded, ...).
-        Only safe metadata is stored: no tool parameters, no credentials.
-        """
-        user_id = user_id or current_user_id()
-        entry = AuditLogEntry(
+        """Build one event entry. Only safe metadata is stored: no tool parameters, no credentials."""
+        clean_detail = sanitize_text(detail)
+        return AuditLogEntry(
             id=f"audit_{uuid.uuid4().hex[:12]}",
             goal=(sanitize_text(goal) or "")[:300] or "Workflow event",
             approval_status=status or "n/a",
             tools_executed=[tool] if tool else [],
             execution_status=status or "n/a",
-            error_summary=(sanitize_text(detail) or None) and sanitize_text(detail)[:500],
+            error_summary=clean_detail[:500] if clean_detail else None,
             timestamp=datetime.now(),
             user_id=user_id,
             event_type=event_type,
@@ -102,7 +91,17 @@ class AuditService:
             step_id=step_id,
             tool=tool,
         )
-        return self.persistence.record_audit_log(entry, user_id=user_id)
+
+    def record_event(self, event_type: str, user_id: str | None = None, **fields) -> AuditLogEntry:
+        """Record a single workflow lifecycle event (workflow_started, approval_granted, tool_failed, ...)."""
+        user_id = user_id or current_user_id()
+        return self.persistence.record_audit_log(self._event_entry(event_type, user_id, **fields), user_id=user_id)
+
+    def record_events(self, events: list[dict], user_id: str | None = None) -> list[AuditLogEntry]:
+        """Record several lifecycle events at once, preserving order (one batched write on Firestore)."""
+        user_id = user_id or current_user_id()
+        entries = [self._event_entry(user_id=user_id, **ev) for ev in events]
+        return self.persistence.record_audit_logs(entries, user_id=user_id)
 
     def get_logs(
         self, limit: int = 50, user_id: str | None = None

@@ -1,30 +1,29 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import os
 from typing import Any
 
-try:
-    from models.agent import AgentTask, NoteItem, ScheduleEvent
-    from models.audit import AuditLogEntry
-    from models.memory import StudentPreferences
-    from services.persistence import (
-        DEFAULT_USER_ID,
-        BasePersistence,
-        EntityNotFoundError,
-        PersistenceError,
-    )
-except ImportError:
-    from backend.models.agent import AgentTask, NoteItem, ScheduleEvent
-    from backend.models.audit import AuditLogEntry
-    from backend.models.memory import StudentPreferences
-    from backend.services.persistence import (
-        DEFAULT_USER_ID,
-        BasePersistence,
-        EntityNotFoundError,
-        PersistenceError,
-    )
+from models.agent import AgentTask, NoteItem, ScheduleEvent
+from models.audit import AuditLogEntry
+from models.memory import StudentPreferences
+from services.persistence import (
+    DEFAULT_USER_ID,
+    BasePersistence,
+    EntityNotFoundError,
+    PersistenceError,
+)
 
 logger = logging.getLogger(__name__)
+
+try:
+    from google.cloud.firestore_v1.base_query import FieldFilter
+except ImportError:  # pragma: no cover - the SDK is a declared dependency
+    class FieldFilter:  # minimal stand-in with the same attributes
+        def __init__(self, field_path: str, op_string: str, value: Any) -> None:
+            self.field_path, self.op_string, self.value = field_path, op_string, value
+
+_DESCENDING = "DESCENDING"
+_BATCH_LIMIT = 450  # Firestore allows 500 writes per batch
 
 
 def _to_datetime(val: Any) -> datetime | None:
@@ -280,6 +279,21 @@ class FirestorePersistence(BasePersistence):
             ]
         return events
 
+    def get_events_overlapping(
+        self, start_time: datetime, end_time: datetime, user_id: str = DEFAULT_USER_ID
+    ) -> list[ScheduleEvent]:
+        """
+        Indexed range query instead of reading every event. Events are at most 24 hours long
+        (enforced by the router), so anything overlapping [start, end) starts after start - 24h.
+        """
+        coll = self._user_ref(user_id).collection("schedule")
+        lower = (start_time - timedelta(hours=24)).isoformat()
+        query = coll.where(filter=FieldFilter("start_time", ">=", lower)).where(
+            filter=FieldFilter("start_time", "<", end_time.isoformat())
+        )
+        events = [_deserialize_event(doc.to_dict()) for doc in query.stream() if doc.to_dict()]
+        return [e for e in events if e.start_time < end_time and e.end_time > start_time]
+
     def get_event(
         self,
         event_id: str,
@@ -426,16 +440,25 @@ class FirestorePersistence(BasePersistence):
         coll.document(entry.id).set(data)
         return entry.model_copy(deep=True)
 
+    def record_audit_logs(
+        self, entries: list[AuditLogEntry], user_id: str = DEFAULT_USER_ID
+    ) -> list[AuditLogEntry]:
+        """Write a workflow's audit events in one atomic batch (one round trip; billing is per document)."""
+        coll = self._user_ref(user_id).collection("audit_logs")
+        for start in range(0, len(entries), _BATCH_LIMIT):
+            batch = self.client.batch()
+            for entry in entries[start:start + _BATCH_LIMIT]:
+                batch.set(coll.document(entry.id), _serialize_audit_log(entry))
+            batch.commit()
+        return [e.model_copy(deep=True) for e in entries]
+
     def get_audit_logs(
         self, limit: int = 50, user_id: str = DEFAULT_USER_ID
     ) -> list[AuditLogEntry]:
+        # Newest first, read only `limit` documents (single-field index on timestamp).
         coll = self._user_ref(user_id).collection("audit_logs")
-        logs: list[AuditLogEntry] = []
-        for doc in coll.stream():
-            data = doc.to_dict() or {}
-            logs.append(_deserialize_audit_log(data))
-        logs.sort(key=lambda x: x.timestamp, reverse=True)
-        return logs[:limit]
+        query = coll.order_by("timestamp", direction=_DESCENDING).limit(limit)
+        return [_deserialize_audit_log(doc.to_dict() or {}) for doc in query.stream()]
 
     # --- Workflow History Operations ---
     def save_workflow(self, workflow: Any, user_id: str = DEFAULT_USER_ID) -> Any:
@@ -444,28 +467,17 @@ class FirestorePersistence(BasePersistence):
         return workflow
 
     def get_workflow(self, workflow_id: str, user_id: str = DEFAULT_USER_ID) -> Any | None:
-        try:
-            from models.workflow import WorkflowRecord
-        except ImportError:
-            from backend.models.workflow import WorkflowRecord
+        from models.workflow import WorkflowRecord
         doc = self._user_ref(user_id).collection("workflows").document(workflow_id).get()
         if not getattr(doc, "exists", False):
             return None
         return WorkflowRecord.model_validate(doc.to_dict())
 
     def list_workflows(self, limit: int = 20, user_id: str = DEFAULT_USER_ID) -> list[Any]:
-        try:
-            from models.workflow import WorkflowRecord
-        except ImportError:
-            from backend.models.workflow import WorkflowRecord
+        from models.workflow import WorkflowRecord
         coll = self._user_ref(user_id).collection("workflows")
-        items = []
-        for doc in coll.stream():
-            data = doc.to_dict()
-            if data:
-                items.append(WorkflowRecord.model_validate(data))
-        items.sort(key=lambda w: w.updated_at, reverse=True)
-        return items[:limit]
+        query = coll.order_by("updated_at", direction=_DESCENDING).limit(limit)
+        return [WorkflowRecord.model_validate(doc.to_dict()) for doc in query.stream() if doc.to_dict()]
 
     # --- Cleanup / Testing Operations ---
     def clear_tasks(self, user_id: str = DEFAULT_USER_ID) -> None:

@@ -4,14 +4,9 @@ import logging
 import os
 from typing import Any
 
-try:
-    from models.agent import AgentTask, NoteItem, ScheduleEvent
-    from models.audit import AuditLogEntry
-    from models.memory import StudentPreferences
-except ImportError:
-    from backend.models.agent import AgentTask, NoteItem, ScheduleEvent
-    from backend.models.audit import AuditLogEntry
-    from backend.models.memory import StudentPreferences
+from models.agent import AgentTask, NoteItem, ScheduleEvent
+from models.audit import AuditLogEntry
+from models.memory import StudentPreferences
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +208,18 @@ class BasePersistence(ABC):
         """Retrieve recent audit logs for a user, sorted descending by timestamp."""
         pass
 
+    def get_events_overlapping(
+        self, start: datetime, end: datetime, user_id: str = DEFAULT_USER_ID
+    ) -> list[ScheduleEvent]:
+        """Events overlapping [start, end). Adapters may override with an indexed range query."""
+        return [e for e in self.get_events(user_id=user_id) if e.start_time < end and e.end_time > start]
+
+    def record_audit_logs(
+        self, entries: list[AuditLogEntry], user_id: str = DEFAULT_USER_ID
+    ) -> list[AuditLogEntry]:
+        """Record several audit entries (in order). Adapters may override with a single batched write."""
+        return [self.record_audit_log(e, user_id=user_id) for e in entries]
+
     # --- Workflow History Operations ---
     def save_workflow(self, workflow: Any, user_id: str = DEFAULT_USER_ID) -> Any:
         """Save or replace a WorkflowRecord for a user."""
@@ -268,10 +275,7 @@ def get_persistence() -> BasePersistence:
 
     if firestore_requested:
         try:
-            try:
-                from services.firestore import init_firestore
-            except ImportError:
-                from backend.services.firestore import init_firestore
+            from services.firestore import init_firestore
 
             fs_instance = init_firestore()
             if fs_instance is not None:
@@ -287,10 +291,7 @@ def get_persistence() -> BasePersistence:
                 type(e).__name__,
             )
 
-    try:
-        from services.in_memory import InMemoryPersistence
-    except ImportError:
-        from backend.services.in_memory import InMemoryPersistence
+    from services.in_memory import InMemoryPersistence
 
     _current_persistence = InMemoryPersistence()
     # "memory_fallback" tells the UI that durable storage was requested but is NOT active.
@@ -315,7 +316,6 @@ def reset_persistence() -> None:
 
 def get_persistence_mode() -> str:
     """Return the active persistence mode ('memory' or 'firestore')."""
-    global _persistence_mode
     if _current_persistence is None:
         get_persistence()
     return _persistence_mode

@@ -211,7 +211,7 @@ export function App() {
 
           <div className="min-w-0 space-y-4 lg:space-y-6">
             <div className={cx(region("plan"), "space-y-4 lg:space-y-6")}>
-              <div ref={resultsRef} tabIndex={-1} className="scroll-mt-20 space-y-4 focus:outline-none lg:space-y-6" aria-label="Results">
+              <div ref={resultsRef} tabIndex={-1} role="region" className="scroll-mt-20 space-y-4 focus:outline-none lg:space-y-6" aria-label="Results">
                 {loading && <Planning />}
                 {runError && (
                   <Notice

@@ -19,10 +19,30 @@ Scope: backend API, agent pipeline, persistence, frontend, configuration. Review
 | 11 | Low | Unhandled errors could return framework default bodies | **Fixed** — JSON 500 handler without internals |
 | 12 | Low | Google Fonts loaded from a third party | **Fixed** — system font stack; CSP `default-src 'self'` |
 | 15 | Medium | Session race: parallel first API requests each minted a new session; a late response could replace the cookie that owned a pending approval, making approval fail with 404 (found on the live deployment) | **Fixed** — the session cookie is issued on the page load, before any API call; regression tests added. Failure mode was safe: nothing executed |
+| 16 | Medium | Rate limit bypass: cookie-less clients got a new session (and a fresh per-session limit) on every request — 10/10 requests succeeded at a limit of 3 | **Fixed** — additional per-IP limit on all API calls (default 600/min, generous for shared campus IPs); regression tests |
+| 17 | Low | No explicit Firestore security rules for the app's `(default)` database (default-deny applied implicitly) | **Prepared** — `firestore.rules` (deny all client access) + `firebase.json`; deploying them needs approval |
+| 18 | Low | Gemini output validated with ad-hoc checks | **Hardened** — strict Pydantic schema (allowed fields, types, bounded sizes); unknown fields in tool calls rejected; reason-specific fallback |
 | 13 | High (open) | No account authentication | **Open** — needs an identity-provider decision (see README › Security limitations) |
 | 14 | Medium (open) | Approvals/rate limits in process memory → single instance only | **Accepted for demo** — `--max-instances=1` |
 
 No critical or high finding remains open except #13, which needs an identity-provider decision.
+
+## Threat-model review (2026-10-09)
+
+| Threat | Control | Evidence |
+|---|---|---|
+| Reading another visitor's data (IDOR) | All storage keyed by the session user; IDs from other sessions return 404 | `api/test_security.py` isolation tests; live cross-session 404 |
+| Session fixation / forged sessions | Server-signed cookie; invalid cookies replaced; session issued on page load; `run.app` is a public suffix | forged-cookie tests (API and page load) |
+| CSRF | `SameSite=Lax`; JSON-only bodies (text/plain and form posts get 422) | `test_cross_site_simple_requests_rejected` |
+| Approval replay / substitution / expiry | Single-use atomic claim, SHA-256 payload hash, TTL, server-held plan | approval integrity tests; live 409/400/404 checks |
+| Client claims approval | `approved` field ignored on `/run` | test + live check |
+| Model authorises its own mutation | Approval flags from model discarded; server policy gates all writes | `test_model_cannot_mark_a_delete_as_approved` |
+| Prompt injection | Goal fenced as data; allow-listed tools; schema; approval | Gemini integration tests |
+| Arbitrary code / queries from model | No eval/exec; tool allow-list; parameter validation; no raw queries | tests + static check |
+| Resource exhaustion | 32 KB body cap; goal length; 12-session cap; per-session + per-IP rate limits; bounded Firestore reads; tool timeouts | tests |
+| Secret exposure | Keys only server-side via env/Secret Manager; errors report type names only; status never echoes values | `test_status_*` tests; pattern scans of commits |
+| Direct Firestore access | Only the runtime service account (`roles/datastore.user`); client rules deny (default + prepared file) | Rules API check: `prompt1` deny-all, `(default)` no client rules |
+| Information disclosure in errors | Generic 500s; API docs disabled in production | tests; live checks |
 
 ## Identity and user isolation
 
@@ -51,7 +71,7 @@ Tested: two-session isolation for tasks, workflows, audit, preferences; cross-se
 
 ## AI safety
 
-- Gemini output is data. Tool names must be in the allow-list; parameters are validated; `requires_approval` from the model is discarded; `user_id` is rejected; at most 12 calls; string fields truncated.
+- Gemini output is data. The response must match a strict schema (`ModelPlan`: allowed fields, types, at most 12 tool calls, bounded strings; unknown fields inside tool calls are rejected). Tool names must be in the allow-list; parameters are validated; `requires_approval` from the model is discarded; `user_id` is rejected. The fallback note distinguishes "AI unavailable" (timeouts, quota, auth, network) from "AI plan failed safety checks".
 - The user goal is fenced in the prompt as untrusted text; the system prompt tells the model to ignore instructions that try to change its rules. The server does not rely on this: approval, validation and identity are enforced in code.
 - Any Gemini error, invalid JSON, invalid tool or failed dependency validation → deterministic plan, with a visible note.
 - No `eval`, `exec`, dynamic imports or shell calls (asserted by tests).

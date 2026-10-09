@@ -1,6 +1,7 @@
 import { BadgeCheck, CalendarDays, CircleHelp, ListTodo, NotebookPen, Sparkles } from "lucide-react";
 import { WORKFLOW_STATUS, changedItems, formatRange, splitInfluences, stepCounts } from "../lib/format";
 import StatusBadge from "./StatusBadge";
+import { cx } from "../lib/classes";
 import { Button, Card, Notice } from "./ui";
 
 function FoundList({ icon: Icon, title, items, empty }) {
@@ -45,6 +46,67 @@ function readFindings(workflow) {
   return out;
 }
 
+const PLANNER_LABEL = {
+  gemini: { text: "Planned by Gemini AI", cls: "border-emerald-500/35 bg-emerald-500/10 text-emerald-100" },
+  deterministic: { text: "Built-in planner", cls: "border-line bg-raised text-ink-muted" },
+  deterministic_fallback: { text: "Built-in planner (AI fallback)", cls: "border-amber-500/35 bg-amber-500/10 text-amber-100" },
+};
+
+function PlannerBadge({ mode }) {
+  const meta = PLANNER_LABEL[mode];
+  if (!meta) return null;
+  return <span className={cx("rounded-full border px-2.5 py-1 text-xs font-medium", meta.cls)}>{meta.text}</span>;
+}
+
+const SOURCE_STYLE = {
+  "you said": "border-accent/40 bg-accent/10 text-ink",
+  "saved preference": "border-emerald-500/35 bg-emerald-500/10 text-emerald-100",
+  default: "border-line bg-raised text-ink-muted",
+  inferred: "border-amber-500/35 bg-amber-500/10 text-amber-100",
+};
+
+/** What the planner understood, each fact labelled with where it came from, plus stated assumptions. */
+function Understanding({ facts = [], assumptions = [] }) {
+  if (!facts.length && !assumptions.length) return null;
+  return (
+    <details className="group mt-4 rounded-xl border border-line bg-canvas" open>
+      <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 px-3 text-sm font-medium text-ink">
+        What I understood
+        <span className="text-xs font-normal text-ink-faint group-open:hidden">Show</span>
+      </summary>
+      <div className="border-t border-line px-3 py-3">
+        {facts.length > 0 && (
+          <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            {facts.map((f) => (
+              <div key={`${f.label}-${f.value}`} className="min-w-0">
+                <dt className="text-xs text-ink-faint">{f.label}</dt>
+                <dd className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-ink">
+                  <span className="break-words">{f.value}</span>
+                  <span className={cx("rounded-full border px-2 py-0.5 text-[11px]", SOURCE_STYLE[f.source] || SOURCE_STYLE.default)}>
+                    {f.source}
+                  </span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {assumptions.length > 0 && (
+          <div className={cx(facts.length > 0 && "mt-3 border-t border-line pt-3")}>
+            <p className="text-xs font-medium text-ink-faint">Assumptions I made</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink-muted">
+              {assumptions.map((a) => (
+                <li key={a} className="break-words">
+                  {a}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 export function AgentResult({ executionResult, onEditGoal }) {
   const wf = executionResult?.workflow;
   const status = wf?.status || executionResult?.status;
@@ -61,7 +123,10 @@ export function AgentResult({ executionResult, onEditGoal }) {
         <h2 id="outcome-heading" className="text-base font-semibold tracking-tight text-ink">
           {meta.headline}
         </h2>
-        <StatusBadge status={status} scope="workflow" />
+        <div className="flex flex-wrap items-center gap-2">
+          <PlannerBadge mode={executionResult?.planner_mode} />
+          <StatusBadge status={status} scope="workflow" />
+        </div>
       </div>
 
       {clarification ? (
@@ -79,6 +144,8 @@ export function AgentResult({ executionResult, onEditGoal }) {
           {wf?.next_action && <p className="mt-2 text-sm font-medium text-ink">{wf.next_action}</p>}
         </>
       )}
+
+      <Understanding facts={executionResult?.plan?.understanding} assumptions={executionResult?.plan?.assumptions} />
 
       {executionResult?.planner_note && (
         <Notice tone="info" className="mt-3" title="Built-in planner used">

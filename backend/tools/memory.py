@@ -1,11 +1,7 @@
 from typing import Any
 
-try:
-    from services.memory import MemoryService
-    from services.identity import current_user_id
-except ImportError:
-    from backend.services.memory import MemoryService
-    from backend.services.identity import current_user_id
+from services.memory import MemoryService
+from services.identity import current_user_id
 
 _memory_service = MemoryService()
 
@@ -19,7 +15,7 @@ def get_student_preferences() -> dict[str, Any]:
     service = get_memory_service()
     user_id = current_user_id()
     pref = service.get_preferences(user_id=user_id)
-    summary = service.get_memory_summary(user_id=user_id)
+    summary = service.get_memory_summary(user_id=user_id, preferences=pref)
     return {
         "preferences": pref.model_dump(),
         "summary": summary,
@@ -63,7 +59,7 @@ def update_student_preferences(
     service = get_memory_service()
     user_id = current_user_id()
     updated = service.update_preferences(updates, user_id=user_id)
-    summary = service.get_memory_summary(user_id=user_id)
+    summary = service.get_memory_summary(user_id=user_id, preferences=updated)
     return {
         "success": True,
         "preferences": updated.model_dump(),
@@ -84,7 +80,7 @@ def reset_student_preferences(
     service = get_memory_service()
     user_id = current_user_id()
     reset_pref = service.reset_preferences(confirmation=confirmation, user_id=user_id)
-    summary = service.get_memory_summary(user_id=user_id)
+    summary = service.get_memory_summary(user_id=user_id, preferences=reset_pref)
     return {
         "success": True,
         "message": "Student preferences successfully reset to defaults.",

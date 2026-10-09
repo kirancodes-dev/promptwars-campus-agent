@@ -1,24 +1,14 @@
 from datetime import datetime
 from typing import Any
 
-try:
-    from models.agent import AgentTask, NoteItem, ScheduleEvent
-    from models.audit import AuditLogEntry
-    from models.memory import StudentPreferences
-    from services.persistence import (
-        DEFAULT_USER_ID,
-        BasePersistence,
-        EntityNotFoundError,
-    )
-except ImportError:
-    from backend.models.agent import AgentTask, NoteItem, ScheduleEvent
-    from backend.models.audit import AuditLogEntry
-    from backend.models.memory import StudentPreferences
-    from backend.services.persistence import (
-        DEFAULT_USER_ID,
-        BasePersistence,
-        EntityNotFoundError,
-    )
+from models.agent import AgentTask, NoteItem, ScheduleEvent
+from models.audit import AuditLogEntry
+from models.memory import StudentPreferences
+from services.persistence import (
+    DEFAULT_USER_ID,
+    BasePersistence,
+    EntityNotFoundError,
+)
 
 
 MAX_AUDIT_ENTRIES_PER_USER = 500

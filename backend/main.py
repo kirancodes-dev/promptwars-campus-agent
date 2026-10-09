@@ -18,30 +18,17 @@ try:
 except Exception:  # python-dotenv is optional at runtime
     pass
 
-try:
-    from api.agent import router as agent_router
-    from services.identity import (
-        SESSION_COOKIE_NAME,
-        SESSION_MAX_AGE_SECONDS,
-        bind_user,
-        get_identity_mode,
-        new_session_cookie,
-        reset_user,
-        user_from_cookie,
-    )
-    from services.persistence import DEFAULT_USER_ID
-except ImportError:
-    from backend.api.agent import router as agent_router
-    from backend.services.identity import (
-        SESSION_COOKIE_NAME,
-        SESSION_MAX_AGE_SECONDS,
-        bind_user,
-        get_identity_mode,
-        new_session_cookie,
-        reset_user,
-        user_from_cookie,
-    )
-    from backend.services.persistence import DEFAULT_USER_ID
+from api.agent import router as agent_router
+from services.identity import (
+    SESSION_COOKIE_NAME,
+    SESSION_MAX_AGE_SECONDS,
+    bind_user,
+    get_identity_mode,
+    new_session_cookie,
+    reset_user,
+    user_from_cookie,
+)
+from services.persistence import DEFAULT_USER_ID
 
 logger = logging.getLogger("campuspilot")
 
@@ -75,14 +62,25 @@ class RateLimiter:
             self._hits.clear()
 
     @staticmethod
-    def limit() -> int:
+    def _env_limit(name: str, default: int) -> int:
         try:
-            return max(0, int(os.getenv("RATE_LIMIT_PER_MINUTE", "60")))
+            return max(0, int(os.getenv(name, str(default))))
         except ValueError:
-            return 60
+            return default
 
-    def allow(self, key: str) -> tuple[bool, int]:
-        limit = self.limit()
+    @classmethod
+    def limit(cls) -> int:
+        """State-changing API calls per session per minute."""
+        return cls._env_limit("RATE_LIMIT_PER_MINUTE", 60)
+
+    @classmethod
+    def ip_limit(cls) -> int:
+        """All API calls per client IP per minute. Generous because a campus network shares one IP;
+        it stops clients from bypassing the per-session limit by discarding their cookie."""
+        return cls._env_limit("RATE_LIMIT_PER_IP_PER_MINUTE", 600)
+
+    def allow(self, key: str, limit: int | None = None) -> tuple[bool, int]:
+        limit = self.limit() if limit is None else limit
         if limit == 0:
             return True, 0
         now = time.monotonic()
@@ -193,11 +191,14 @@ class SecurityMiddleware:
                 ):
                     set_cookie_value = None
 
-        # 3. Rate limit state-changing API calls.
-        if path.startswith("/api/") and method in ("POST", "PUT", "PATCH", "DELETE"):
+        # 3. Rate limits: every API call per client IP (cannot be bypassed by dropping the
+        #    cookie), plus state-changing calls per session (or per IP in demo mode).
+        if path.startswith("/api/"):
             client = scope.get("client") or ("unknown", 0)
-            key = user_id if get_identity_mode() == "session" else f"ip:{client[0]}"
-            allowed, retry_after = rate_limiter.allow(key)
+            allowed, retry_after = rate_limiter.allow(f"ipall:{client[0]}", rate_limiter.ip_limit())
+            if allowed and method in ("POST", "PUT", "PATCH", "DELETE"):
+                key = user_id if get_identity_mode() == "session" else f"ip:{client[0]}"
+                allowed, retry_after = rate_limiter.allow(key)
             if not allowed:
                 await self._json(
                     send,

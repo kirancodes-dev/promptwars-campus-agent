@@ -10,6 +10,12 @@ export const FLAGSHIP_RESULT_WAITING = {
     summary: "Study plan for tomorrow: DBMS 9:00 AM–11:00 AM. (Influenced by: Scheduled DBMS during your preferred evening study window.)",
     tasks: [],
     requires_approval: true,
+    understanding: [
+      { label: "DBMS study time", value: "2 hours", source: "you said" },
+      { label: "Study window", value: "09:00–21:00", source: "default" },
+      { label: "DBMS time of day", value: "evening", source: "saved preference" },
+    ],
+    assumptions: ["Your meeting length wasn't given, so I kept 1 hour free for it."],
   },
   results: [],
   approval_requests: [

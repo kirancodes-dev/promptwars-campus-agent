@@ -110,3 +110,24 @@ describe("api client", () => {
     expect(err.message).toMatch(/Can't reach CampusPilot/);
   });
 });
+
+describe("more formatting helpers", () => {
+  it("formats relative times and ranges", async () => {
+    const { relativeTime, formatRange, formatDateTime, toDisplaySteps } = await import("../lib/format");
+    const now = Date.parse("2026-10-09T12:00:00");
+    expect(relativeTime("2026-10-09T11:59:40", now)).toBe("just now");
+    expect(relativeTime("2026-10-09T11:30:00", now)).toBe("30 min ago");
+    expect(relativeTime("2026-10-09T09:00:00", now)).toBe("3 h ago");
+    expect(relativeTime("not a date", now)).toBe("");
+    expect(formatRange("2026-10-10T09:00:00", "2026-10-10T11:00:00")).toMatch(/9:00.*11:00/);
+    expect(formatRange(null, "x")).toBe("");
+    expect(formatDateTime("not a date")).toBe("not a date");
+    const fromPlan = toDisplaySteps({ plan: { tasks: [
+      { id: "a", title: "Read", tool: "get_tasks", parameters: {} },
+      { id: "b", title: "Write", tool: "create_task", requires_approval: true, parameters: {} },
+      { id: "c", title: "Think", tool: null, parameters: {} },
+    ] } });
+    expect(fromPlan.map((s) => s.kind)).toEqual(["read", "write", "reasoning"]);
+    expect(toDisplaySteps(null)).toEqual([]);
+  });
+});

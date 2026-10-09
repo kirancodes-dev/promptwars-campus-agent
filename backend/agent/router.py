@@ -3,10 +3,7 @@ import re
 from typing import Any
 from pydantic import BaseModel, Field
 
-try:
-    from models.agent import ToolCall
-except ImportError:
-    from backend.models.agent import ToolCall
+from models.agent import ToolCall
 
 
 class ToolDefinition(BaseModel):

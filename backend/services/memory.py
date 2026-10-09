@@ -3,14 +3,9 @@ import logging
 import re
 from typing import Any
 
-try:
-    from models.memory import StudentPreferences, StudentPreferencesUpdate
-    from services.identity import current_user_id
-    from services.persistence import DEFAULT_USER_ID, get_persistence
-except ImportError:
-    from backend.models.memory import StudentPreferences, StudentPreferencesUpdate
-    from backend.services.identity import current_user_id
-    from backend.services.persistence import DEFAULT_USER_ID, get_persistence
+from models.memory import StudentPreferences, StudentPreferencesUpdate
+from services.identity import current_user_id
+from services.persistence import get_persistence
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +100,11 @@ class MemoryService:
             )
         return self.persistence.reset_preferences(user_id=user_id or current_user_id())
 
-    def get_memory_summary(self, user_id: str | None = None) -> str:
+    def get_memory_summary(self, user_id: str | None = None, preferences: StudentPreferences | None = None) -> str:
         """
         Return a concise, readable summary of the user's active preferences and memory.
         """
-        pref = self.get_preferences(user_id=user_id or current_user_id())
+        pref = preferences or self.get_preferences(user_id=user_id or current_user_id())
         lines = [
             f"Study Window: {pref.preferred_study_start} - {pref.preferred_study_end}",
             f"Session Duration: {pref.preferred_session_minutes} mins (Break: {pref.preferred_break_minutes} mins)",

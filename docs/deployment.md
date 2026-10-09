@@ -11,8 +11,8 @@ The full step-by-step guide is in [deployment/cloud-run.md](../deployment/cloud-
 | Production mode (`APP_ENV=production`): docs disabled, `Secure` cookies, no dev CORS, CSP, SPA fallback, JSON 404s | **Verified** by running uvicorn locally with production settings |
 | Static asset serving and SPA fallback from FastAPI | **Verified** (browser smoke test) |
 | Secrets via Secret Manager | `SESSION_SECRET` created and mounted; `GEMINI_API_KEY` not yet added (built-in planner in use) |
-| Firestore | **Verified live** (`(default)` database, asia-south1): plan → approve → read-back verification, workflow history and audit log |
-| Cloud Run service | **Deployed**: https://campuspilot-ai-165103643932.asia-south1.run.app (gen2, max 1 instance, scale to zero) |
+| Firestore | **Verified live** (`(default)` database, asia-south1): plan → approve → read-back verification, workflow history and audit log. Explicit deny-all client rules prepared in `firestore.rules` (deploy pending approval) |
+| Cloud Run service | **Deployed**: https://campuspilot-ai-165103643932.asia-south1.run.app (gen2, max 1 instance, scale to zero), revision `campuspilot-ai-00004-gl8` (commit `bc23c9e`). Later local improvements are not deployed yet |
 
 ## Readiness gate
 

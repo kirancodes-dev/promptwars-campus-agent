@@ -5,20 +5,12 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-try:
-    from api.agent import clear_pending_approvals, get_orchestrator
-    from main import app
-    from models.agent import AgentPlan, AgentTask
-    from tools.notes import _notes
-    from tools.schedule import _events
-    from tools.tasks import _tasks, create_task
-except ImportError:
-    from backend.api.agent import clear_pending_approvals, get_orchestrator
-    from backend.main import app
-    from backend.models.agent import AgentPlan, AgentTask
-    from backend.tools.notes import _notes
-    from backend.tools.schedule import _events
-    from backend.tools.tasks import _tasks, create_task
+from api.agent import clear_pending_approvals, get_orchestrator
+from main import app
+from models.agent import AgentPlan, AgentTask
+from tools.notes import _notes
+from tools.schedule import _events
+from tools.tasks import _tasks, create_task
 
 
 class TestAgentAPI(unittest.TestCase):

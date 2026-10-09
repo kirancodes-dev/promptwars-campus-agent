@@ -1,23 +1,13 @@
-from datetime import date, date as dt_date, datetime, datetime as dt_datetime, time, time as dt_time, timedelta
+from datetime import date, date as dt_date, datetime, datetime as dt_datetime, time, timedelta
 from typing import Any
 import uuid
 
-try:
-    from models.agent import ScheduleEvent, ScheduleStatus
-    from services.identity import current_user_id
-    from services.persistence import (
-        DEFAULT_USER_ID,
-        EntityNotFoundError,
-        get_persistence,
-    )
-except ImportError:
-    from backend.models.agent import ScheduleEvent, ScheduleStatus
-    from backend.services.identity import current_user_id
-    from backend.services.persistence import (
-        DEFAULT_USER_ID,
-        EntityNotFoundError,
-        get_persistence,
-    )
+from models.agent import ScheduleEvent
+from services.identity import current_user_id
+from services.persistence import (
+    EntityNotFoundError,
+    get_persistence,
+)
 
 
 class EventNotFoundError(KeyError):
@@ -193,9 +183,10 @@ def check_schedule_conflict(
     if end_time <= start_time:
         raise ValueError("end_time must be after start_time")
 
+    nearby = get_persistence().get_events_overlapping(start_time, end_time, user_id=current_user_id())
     conflicting_events = [
         event
-        for event in _events.values()
+        for event in nearby
         if (exclude_event_id is None or event.id != exclude_event_id)
         and event.status != "cancelled"
         and event.start_time < end_time
@@ -209,6 +200,56 @@ def check_schedule_conflict(
     }
 
 
+DEFAULT_WINDOW = (time(9, 0), time(21, 0))
+
+
+def _resolve_date(value: datetime | date | str | None) -> date:
+    if isinstance(value, dt_datetime):
+        return value.date()
+    if isinstance(value, dt_date):
+        return value
+    if isinstance(value, str) and ("T" in value or "-" in value):
+        return datetime.fromisoformat(value).date()
+    return datetime.now().date()
+
+
+def _resolve_bound(value: datetime | time | str | None, day: date, default: time) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, time):
+        return datetime.combine(day, value)
+    if isinstance(value, str):
+        return datetime.fromisoformat(value) if "T" in value else datetime.combine(day, time.fromisoformat(value))
+    return datetime.combine(day, default)
+
+
+def _window(day_value, preferred_start, preferred_end) -> tuple[datetime, datetime]:
+    day = _resolve_date(day_value)
+    return (
+        _resolve_bound(preferred_start, day, DEFAULT_WINDOW[0]),
+        _resolve_bound(preferred_end, day, DEFAULT_WINDOW[1]),
+    )
+
+
+def _free_gaps(window_start: datetime, window_end: datetime, busy: list[tuple[datetime, datetime]]):
+    """Yield (gap_start, gap_end) for every free interval inside the window, in time order."""
+    cursor = window_start
+    for b_start, b_end in sorted(busy):
+        if b_end <= window_start or b_start >= window_end:
+            continue
+        gap_end = min(b_start, window_end)
+        if gap_end > cursor:
+            yield cursor, gap_end
+        cursor = max(cursor, b_end)
+    if window_end > cursor:
+        yield cursor, window_end
+
+
+def _busy_between(window_start: datetime, window_end: datetime) -> list[tuple[datetime, datetime]]:
+    events = get_persistence().get_events_overlapping(window_start, window_end, user_id=current_user_id())
+    return [(e.start_time, e.end_time) for e in events if e.status != "cancelled"]
+
+
 def find_available_slots(
     date: datetime | date | str,
     duration_minutes: int,
@@ -216,108 +257,38 @@ def find_available_slots(
     preferred_end: datetime | time | str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Locate all available non-conflicting time slots on a given date for the requested duration.
-    Calculates gaps between existing non-cancelled events within the preferred time window.
-    Does not invent existing events or modify storage.
+    One slot (at the start of each free gap) for every gap that fits the duration, on the given date
+    within the preferred window (default 09:00–21:00). Reads storage; never modifies it.
     """
     if duration_minutes <= 0:
         raise ValueError("duration_minutes must be positive")
-
-    # Resolve target date
-    if isinstance(date, str):
-        target_date = (
-            datetime.fromisoformat(date).date()
-            if "T" in date or "-" in date
-            else datetime.now().date()
-        )
-    elif isinstance(date, dt_datetime):
-        target_date = date.date()
-    elif isinstance(date, dt_date):
-        target_date = date
-    else:
-        target_date = datetime.now().date()
-
-    # Resolve window start
-    if preferred_start is None:
-        window_start = datetime.combine(target_date, time(9, 0))
-    elif isinstance(preferred_start, datetime):
-        window_start = preferred_start
-    elif isinstance(preferred_start, time):
-        window_start = datetime.combine(target_date, preferred_start)
-    elif isinstance(preferred_start, str):
-        window_start = (
-            datetime.fromisoformat(preferred_start)
-            if "T" in preferred_start
-            else datetime.combine(target_date, time.fromisoformat(preferred_start))
-        )
-    else:
-        window_start = datetime.combine(target_date, time(9, 0))
-
-    # Resolve window end
-    if preferred_end is None:
-        window_end = datetime.combine(target_date, time(21, 0))
-    elif isinstance(preferred_end, datetime):
-        window_end = preferred_end
-    elif isinstance(preferred_end, time):
-        window_end = datetime.combine(target_date, preferred_end)
-    elif isinstance(preferred_end, str):
-        window_end = (
-            datetime.fromisoformat(preferred_end)
-            if "T" in preferred_end
-            else datetime.combine(target_date, time.fromisoformat(preferred_end))
-        )
-    else:
-        window_end = datetime.combine(target_date, time(21, 0))
-
+    window_start, window_end = _window(date, preferred_start, preferred_end)
     if window_end <= window_start:
         return []
-
-    # Get overlapping active events sorted by start time
-    active_events = [
-        event
-        for event in _events.values()
-        if event.status != "cancelled"
-        and event.start_time < window_end
-        and event.end_time > window_start
-    ]
-    active_events.sort(key=lambda e: e.start_time)
-
-    available_slots: list[dict[str, Any]] = []
-    curr = window_start
-
-    for ev in active_events:
-        gap_start = max(curr, window_start)
-        gap_end = min(ev.start_time, window_end)
-        if gap_end > gap_start:
-            gap_minutes = (gap_end - gap_start).total_seconds() / 60
-            if gap_minutes >= duration_minutes:
-                slot_end = gap_start + timedelta(minutes=duration_minutes)
-                available_slots.append(
-                    {
-                        "start_time": gap_start,
-                        "end_time": slot_end,
-                        "duration_minutes": duration_minutes,
-                        "available_duration_minutes": int(gap_minutes),
-                    }
-                )
-        curr = max(curr, ev.end_time)
-
-    # Check remaining time after last event
-    gap_start = max(curr, window_start)
-    if window_end > gap_start:
-        gap_minutes = (window_end - gap_start).total_seconds() / 60
+    slots: list[dict[str, Any]] = []
+    for gap_start, gap_end in _free_gaps(window_start, window_end, _busy_between(window_start, window_end)):
+        gap_minutes = (gap_end - gap_start).total_seconds() / 60
         if gap_minutes >= duration_minutes:
-            slot_end = gap_start + timedelta(minutes=duration_minutes)
-            available_slots.append(
-                {
-                    "start_time": gap_start,
-                    "end_time": slot_end,
-                    "duration_minutes": duration_minutes,
-                    "available_duration_minutes": int(gap_minutes),
-                }
-            )
+            slots.append({
+                "start_time": gap_start,
+                "end_time": gap_start + timedelta(minutes=duration_minutes),
+                "duration_minutes": duration_minutes,
+                "available_duration_minutes": int(gap_minutes),
+            })
+    return slots
 
-    return available_slots
+
+def _normalize_requirements(requirements) -> list[tuple[str, int]]:
+    if isinstance(requirements, dict):
+        return [(str(k), int(v)) for k, v in requirements.items()]
+    normalized: list[tuple[str, int]] = []
+    for item in requirements or []:
+        if isinstance(item, dict):
+            subject = str(item.get("subject") or item.get("title") or "Study")
+            normalized.append((subject, int(item.get("duration_minutes") or item.get("duration") or 60)))
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            normalized.append((str(item[0]), int(item[1])))
+    return normalized
 
 
 def propose_study_blocks(
@@ -327,113 +298,29 @@ def propose_study_blocks(
     preferred_end: datetime | time | str | None = None,
 ) -> list[ScheduleEvent]:
     """
-    Convert study requirements into schedule proposals based on available time slots.
-    Does NOT modify schedule storage; this is purely a proposal stage.
+    Convert study requirements into schedule proposals in the first free gaps, without overlapping
+    each other. Does NOT modify schedule storage; this is purely a proposal stage.
     """
-    normalized: list[tuple[str, int]] = []
-    if isinstance(requirements, dict):
-        normalized = [(str(k), int(v)) for k, v in requirements.items()]
-    elif isinstance(requirements, list):
-        for item in requirements:
-            if isinstance(item, dict):
-                subject = str(item.get("subject") or item.get("title") or "Study")
-                duration = int(item.get("duration_minutes") or item.get("duration") or 60)
-                normalized.append((subject, duration))
-            elif isinstance(item, (tuple, list)) and len(item) >= 2:
-                normalized.append((str(item[0]), int(item[1])))
-
+    window_start, window_end = _window(target_date, preferred_start, preferred_end)
+    busy = _busy_between(window_start, window_end)
     proposals: list[ScheduleEvent] = []
-    allocated_intervals: list[tuple[datetime, datetime]] = []
-
-    existing_intervals = [
-        (e.start_time, e.end_time)
-        for e in _events.values()
-        if e.status != "cancelled"
-    ]
-
-    for subject, duration_mins in normalized:
-        blocked = sorted(existing_intervals + allocated_intervals, key=lambda x: x[0])
-
-        if isinstance(target_date, str):
-            t_date = (
-                datetime.fromisoformat(target_date).date()
-                if "T" in target_date or "-" in target_date
-                else datetime.now().date()
-            )
-        elif isinstance(target_date, dt_datetime):
-            t_date = target_date.date()
-        elif isinstance(target_date, dt_date):
-            t_date = target_date
-        else:
-            t_date = datetime.now().date()
-
-        if preferred_start is None:
-            win_start = datetime.combine(t_date, time(9, 0))
-        elif isinstance(preferred_start, datetime):
-            win_start = preferred_start
-        elif isinstance(preferred_start, time):
-            win_start = datetime.combine(t_date, preferred_start)
-        elif isinstance(preferred_start, str):
-            win_start = (
-                datetime.fromisoformat(preferred_start)
-                if "T" in preferred_start
-                else datetime.combine(t_date, time.fromisoformat(preferred_start))
-            )
-        else:
-            win_start = datetime.combine(t_date, time(9, 0))
-
-        if preferred_end is None:
-            win_end = datetime.combine(t_date, time(21, 0))
-        elif isinstance(preferred_end, datetime):
-            win_end = preferred_end
-        elif isinstance(preferred_end, time):
-            win_end = datetime.combine(t_date, preferred_end)
-        elif isinstance(preferred_end, str):
-            win_end = (
-                datetime.fromisoformat(preferred_end)
-                if "T" in preferred_end
-                else datetime.combine(t_date, time.fromisoformat(preferred_end))
-            )
-        else:
-            win_end = datetime.combine(t_date, time(21, 0))
-
-        curr = win_start
-        found_slot = None
-
-        for b_start, b_end in blocked:
-            if b_end <= win_start or b_start >= win_end:
-                continue
-            gap_start = max(curr, win_start)
-            gap_end = min(b_start, win_end)
-            if (
-                gap_end > gap_start
-                and (gap_end - gap_start).total_seconds() / 60 >= duration_mins
-            ):
-                found_slot = (gap_start, gap_start + timedelta(minutes=duration_mins))
-                break
-            curr = max(curr, b_end)
-
-        if not found_slot:
-            gap_start = max(curr, win_start)
-            if (
-                win_end > gap_start
-                and (win_end - gap_start).total_seconds() / 60 >= duration_mins
-            ):
-                found_slot = (gap_start, gap_start + timedelta(minutes=duration_mins))
-
-        if found_slot:
-            slot_s, slot_e = found_slot
-            allocated_intervals.append((slot_s, slot_e))
-            proposals.append(
-                ScheduleEvent(
-                    id=f"prop_{uuid.uuid4().hex[:8]}",
-                    title=f"{subject} Study",
-                    description=f"Study {subject} for {duration_mins} minutes",
-                    start_time=slot_s,
-                    end_time=slot_e,
-                    status="scheduled",
-                    requires_approval=True,
-                )
-            )
-
+    for subject, minutes in _normalize_requirements(requirements):
+        slot = next(
+            ((g_start, g_start + timedelta(minutes=minutes))
+             for g_start, g_end in _free_gaps(window_start, window_end, busy)
+             if (g_end - g_start).total_seconds() / 60 >= minutes),
+            None,
+        )
+        if slot is None:
+            continue
+        busy.append(slot)
+        proposals.append(ScheduleEvent(
+            id=f"prop_{uuid.uuid4().hex[:8]}",
+            title=f"{subject} Study",
+            description=f"Study {subject} for {minutes} minutes",
+            start_time=slot[0],
+            end_time=slot[1],
+            status="scheduled",
+            requires_approval=True,
+        ))
     return proposals

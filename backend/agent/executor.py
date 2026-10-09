@@ -1,62 +1,33 @@
 import uuid
 from typing import Any, Callable
 
-try:
-    from agent.router import ToolNotFoundError, get_tool, validate_parameters
-    from models.agent import ApprovalRequest, ToolCall, ToolResult
-    from tools.notes import (
-        create_note,
-        delete_note,
-        get_notes,
-        search_notes,
-        update_note,
-    )
-    from tools.schedule import (
-        check_schedule_conflict,
-        create_schedule,
-        delete_schedule,
-        get_schedule,
-        update_schedule,
-    )
-    from tools.tasks import (
-        create_task,
-        delete_task,
-        get_tasks,
-        update_task,
-    )
-    from tools.memory import (
-        get_student_preferences,
-        reset_student_preferences,
-        update_student_preferences,
-    )
-except ImportError:
-    from backend.agent.router import ToolNotFoundError, get_tool, validate_parameters
-    from backend.models.agent import ApprovalRequest, ToolCall, ToolResult
-    from backend.tools.notes import (
-        create_note,
-        delete_note,
-        get_notes,
-        search_notes,
-        update_note,
-    )
-    from backend.tools.schedule import (
-        check_schedule_conflict,
-        create_schedule,
-        delete_schedule,
-        get_schedule,
-        update_schedule,
-    )
-    from backend.tools.tasks import (
-        create_task,
-        delete_task,
-        get_tasks,
-        update_task,
-    )
-    from backend.tools.memory import (
-        get_student_preferences,
-        reset_student_preferences,
-        update_student_preferences,
-    )
+from agent.router import ToolNotFoundError, get_tool, validate_parameters
+from models.agent import ApprovalRequest, ToolCall, ToolResult
+from tools.notes import (
+    create_note,
+    delete_note,
+    get_notes,
+    search_notes,
+    update_note,
+)
+from tools.schedule import (
+    check_schedule_conflict,
+    create_schedule,
+    delete_schedule,
+    get_schedule,
+    update_schedule,
+)
+from tools.tasks import (
+    create_task,
+    delete_task,
+    get_tasks,
+    update_task,
+)
+from tools.memory import (
+    get_student_preferences,
+    reset_student_preferences,
+    update_student_preferences,
+)
 
 # Explicit mapping of registered tool names to python functions
 _TOOL_FUNCTION_MAP: dict[str, Callable[..., Any]] = {

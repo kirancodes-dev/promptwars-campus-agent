@@ -11,7 +11,7 @@ function Brand() {
         <path d="m32 34.3 14 6.2L32 48l-14-7.5 14-6.2Z" fill="#34d399" />
       </svg>
       <div className="min-w-0 leading-tight">
-        <p className="truncate text-[15px] font-semibold tracking-tight text-ink">CampusPilot AI</p>
+        <h1 className="truncate text-[15px] font-semibold tracking-tight text-ink">CampusPilot AI</h1>
         <p className="hidden truncate text-xs text-ink-faint sm:block">Plans your study time. Changes nothing without you.</p>
       </div>
     </div>

@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// CampusPilot AI never accesses Firestore from the browser. Only the backend's
+// runtime service account (IAM role roles/datastore.user) reads and writes data,
+// and server-side IAM access is not affected by these rules.
+// Deny all direct client (web/mobile SDK) access explicitly.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

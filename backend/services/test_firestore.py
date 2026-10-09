@@ -79,6 +79,15 @@ class FakeCollection:
     def document(self, doc_id: str):
         return FakeDocRef(doc_id, self, self.client)
 
+    def where(self, *args, **kwargs):
+        return FakeQuery(self).where(*args, **kwargs)
+
+    def order_by(self, *args, **kwargs):
+        return FakeQuery(self).order_by(*args, **kwargs)
+
+    def limit(self, n):
+        return FakeQuery(self).limit(n)
+
     def stream(self):
         return [
             FakeDocumentSnapshot(
@@ -91,11 +100,59 @@ class FakeCollection:
         ]
 
 
+class FakeQuery:
+    """Minimal query support: where (FieldFilter), order_by, limit, stream."""
+
+    def __init__(self, collection, filters=None, order=None, limit_n=None):
+        self.collection, self.filters, self.order, self.limit_n = collection, list(filters or []), order, limit_n
+
+    def where(self, field_path=None, op_string=None, value=None, filter=None):
+        f = filter or type("F", (), {"field_path": field_path, "op_string": op_string, "value": value})()
+        return FakeQuery(self.collection, self.filters + [f], self.order, self.limit_n)
+
+    def order_by(self, field, direction="ASCENDING"):
+        return FakeQuery(self.collection, self.filters, (field, direction), self.limit_n)
+
+    def limit(self, n):
+        return FakeQuery(self.collection, self.filters, self.order, n)
+
+    def stream(self):
+        ops = {">=": lambda a, b: a >= b, "<": lambda a, b: a < b, ">": lambda a, b: a > b, "<=": lambda a, b: a <= b, "==": lambda a, b: a == b}
+        rows = [(i, d) for i, d in self.collection.docs.items()
+                if all(f.field_path in d and ops[f.op_string](d[f.field_path], f.value) for f in self.filters)]
+        if self.order:
+            field, direction = self.order
+            rows = [r for r in rows if field in r[1]]
+            rows.sort(key=lambda r: r[1][field], reverse=direction == "DESCENDING")
+        if self.limit_n is not None:
+            rows = rows[: self.limit_n]
+        self.collection.client.docs_read += len(rows)
+        return [FakeDocumentSnapshot(i, d, exists=True, reference=FakeDocRef(i, self.collection, self.collection.client)) for i, d in rows]
+
+
+class FakeBatch:
+    def __init__(self, client):
+        self.client, self.ops = client, []
+
+    def set(self, doc_ref, data):
+        self.ops.append((doc_ref, data))
+
+    def commit(self):
+        self.client.batch_commits += 1
+        for ref, data in self.ops:
+            ref.set(data)
+
+
 class FakeFirestoreClient:
     """Mock Firestore Client simulating collection/document hierarchy."""
 
     def __init__(self):
         self._collections: dict[str, FakeCollection] = {}
+        self.docs_read = 0
+        self.batch_commits = 0
+
+    def batch(self):
+        return FakeBatch(self)
 
     def collection(self, name: str):
         return self._get_or_create_collection(name)
@@ -312,3 +369,57 @@ class TestFirestorePersistence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFirestoreEfficientQueries(unittest.TestCase):
+    """Bounded reads and batched writes on the Firestore adapter (fake client counts documents read)."""
+
+    def setUp(self):
+        from models.audit import AuditLogEntry
+        from models.workflow import WorkflowRecord
+
+        self.AuditLogEntry, self.WorkflowRecord = AuditLogEntry, WorkflowRecord
+        self.client = FakeFirestoreClient()
+        self.fs = FirestorePersistence(client=self.client)
+
+    def _event(self, eid, start, hours=1):
+        return ScheduleEvent(id=eid, title=eid, start_time=start, end_time=start + timedelta(hours=hours))
+
+    def test_overlap_query_returns_exactly_the_overlapping_events(self):
+        day = datetime(2026, 10, 10, 0, 0)
+        for e in [
+            self._event("before", day - timedelta(days=3)),
+            self._event("overnight", day - timedelta(hours=2), hours=4),   # starts the day before, ends inside
+            self._event("long-cross", day - timedelta(hours=23), hours=24),  # max length, crosses into the day
+            self._event("inside", day + timedelta(hours=9)),
+            self._event("after", day + timedelta(days=2)),
+        ]:
+            self.fs.create_event(e)
+        found = {e.id for e in self.fs.get_events_overlapping(day, day + timedelta(days=1))}
+        self.assertEqual(found, {"overnight", "long-cross", "inside"})
+
+    def test_audit_log_reads_only_the_newest_limit(self):
+        base = datetime(2026, 10, 9, 8, 0)
+        entries = [self.AuditLogEntry(id=f"a{i:02d}", goal="g", approval_status="n/a", execution_status="n/a",
+                                      timestamp=base + timedelta(minutes=i)) for i in range(60)]
+        self.fs.record_audit_logs(entries)
+        self.assertEqual(self.client.batch_commits, 1)
+        self.client.docs_read = 0
+        logs = self.fs.get_audit_logs(limit=10)
+        self.assertEqual([l.id for l in logs], [f"a{i:02d}" for i in range(59, 49, -1)])
+        self.assertEqual(self.client.docs_read, 10)
+
+    def test_batched_audit_writes_chunk_large_batches(self):
+        entries = [self.AuditLogEntry(id=f"b{i}", goal="g", approval_status="n/a", execution_status="n/a") for i in range(1000)]
+        self.fs.record_audit_logs(entries)
+        self.assertEqual(self.client.batch_commits, 3)  # 450 + 450 + 100
+        self.assertEqual(len(self.fs.get_audit_logs(limit=2000)), 1000)
+
+    def test_workflow_history_is_newest_first_and_bounded(self):
+        base = datetime(2026, 10, 9, 8, 0)
+        for i in range(30):
+            self.fs.save_workflow(self.WorkflowRecord(workflow_id=f"wf{i:02d}", goal="g", updated_at=base + timedelta(minutes=i)))
+        self.client.docs_read = 0
+        items = self.fs.list_workflows(limit=5)
+        self.assertEqual([w.workflow_id for w in items], ["wf29", "wf28", "wf27", "wf26", "wf25"])
+        self.assertEqual(self.client.docs_read, 5)

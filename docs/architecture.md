@@ -56,7 +56,13 @@ sequenceDiagram
 | Identity | `backend/services/identity.py` | HMAC-signed `cp_session` cookie → `session-<id>` user; contextvar used by every tool |
 | API | `backend/api/agent.py` | REST endpoints; stages approvals; never forwards a client approval flag |
 | Orchestrator | `backend/agent/orchestrator.py` | Planning with fallback, approval policy, sequential dependency-gated execution, retries, timeouts, verification, audit |
-| Planner | `backend/agent/planner.py` | Intent detection and deterministic builders; Gemini plan parsing/hardening |
+| Planner entry point | `backend/agent/planner.py` | `plan_goal` (deterministic) and `plan_goal_smart` (Gemini with fallback); dispatch by intent |
+| Intent | `backend/agent/planning/intent.py` | Ordered rule table: which kind of request this is |
+| Fact extraction | `backend/agent/planning/extraction.py` | Subjects + durations, dates, exam deadlines, priorities, meeting, explicit times, vague dates |
+| Scheduling | `backend/agent/planning/scheduling.py` | Free-slot search over a calendar of busy time; single-day and earliest-deadline-first multi-day allocation |
+| Study planner | `backend/agent/planning/study.py` | Builds the read-before-write workflow, explanations, "understanding" facts with sources, assumptions, clarification questions |
+| Simple builders | `backend/agent/planning/builders.py`, `preferences_text.py` | Tasks, notes, listings, preferences |
+| Gemini validation | `backend/agent/planning/gemini_plan.py` | Strict schema for model output, router validation, approval policy, reason-specific errors |
 | Router | `backend/agent/router.py` | Tool allow-list (17 tools), required/unknown parameter checks, value validation, `mutates` flag |
 | Executor | `backend/agent/executor.py` | Maps tool names to Python functions; refuses protected tools without approval |
 | Workflow validation/verification | `backend/agent/workflow.py` | Dependency graph checks; read-back verification for every write tool |
@@ -82,7 +88,11 @@ Execution rules (sequential, in plan order):
 
 ## Planning
 
-- **Deterministic planner** (always available): intent detection → builders. The study planner extracts `(subject, minutes)` pairs ("2 hours of DBMS", "DAA for 90 minutes"), an optional meeting time, explicit per-subject times ("DBMS at 6 PM"), then allocates non-overlapping slots inside the saved study window, honouring break length and subject time-of-day preferences, and avoiding existing events and the meeting.
+- **Deterministic planner** (always available): intent detection → builders. The study planner extracts facts (`GoalFacts`): `(subject, minutes)` pairs ("2 hours of DBMS", "DAA for 90 minutes"), a planning date ("tomorrow", "on Friday", "in 3 days", "15 Oct"), exam deadlines per subject, priorities, an optional meeting time and explicit per-subject times ("DBMS at 6 PM").
+  - **Single day** (no exam dates): non-overlapping slots inside the saved study window, higher priority first, honouring break length and subject time-of-day preferences, avoiding existing events and the meeting.
+  - **Before exams** (exam dates given): each subject's time is split into sessions of the preferred length and spread over the study days before its exam (earliest deadline first, never on the exam day), at most 12 sessions per plan.
+  - **Never guesses**: vague dates, exams without study time, past exam dates, conflicts with an explicitly requested time, or not enough free time produce one focused question that quotes the real numbers.
+  - Every plan carries `understanding` (facts with source: you said / saved preference / default / inferred) and `assumptions`.
 - **Gemini planner** (when `GEMINI_API_KEY` is set): structured JSON with a tool catalog. Output is capped (12 tool calls, string lengths), `requires_approval` and `user_id` fields from the model are discarded/rejected, writes are made to depend on preceding reads, and the plan must pass the same dependency validation. Any failure → deterministic plan with `planner_mode="deterministic_fallback"` and a user-visible note.
 
 ## Storage layout
@@ -99,6 +109,12 @@ users/{user_id}/workflows/{workflow_id}
 ```
 
 Pending approvals and rate-limit counters are **not** persisted (process memory only).
+
+Read/write efficiency (Firestore adapter):
+- Audit log and workflow history: `order_by(...DESC).limit(n)` — reads exactly `n` documents.
+- Schedule reads for planning and conflict checks: a `start_time` range query over the planning horizon (events are at most 24 h, so `start ≥ horizon_start − 24 h`).
+- A workflow's audit events are written in one batch (one round trip; still one billed write per event).
+- Single-field indexes only; no composite indexes are required.
 
 ## API
 
@@ -123,4 +139,5 @@ Pending approvals and rate-limit counters are **not** persisted (process memory 
 - Approval replays return **409**, expired approvals **410**, other users' approvals **404**, payload mismatch **400**.
 - `/approve` and `/reject` reject unknown body fields (422).
 - `AgentExecutionResult` gained `workflow`, `skipped_actions`, `planner_mode`, `planner_note`; `ApprovalRequest` gained `step_id`, `title`, `description`, `payload_hash`, `expires_at`; new status value `rejected`.
+- `AgentPlan` gained `understanding` (list of `{label, value, source}`) and `assumptions` (list of strings). Additive; existing clients are unaffected.
 - `/memory/update` with `approved:true` now *replaces* lists/maps (form semantics) instead of appending.

@@ -82,8 +82,8 @@ await page.getByRole("button", { name: /Add subject timing/ }).click();
 await page.getByRole("textbox", { name: "Subject 1" }).fill("DBMS");
 await page.screenshot({ path: `${SHOTS}/journey-4-prefs-edit-390.png`, fullPage: true });
 await page.getByRole("button", { name: /Save preferences/ }).click();
-await page.getByText(/Saved and verified (in temporary|\.)/).waitFor();
-log("prefs saved message:", await page.getByText(/Saved and verified (in temporary|\.)/).innerText());
+await page.getByText(/Saved and verified( in temporary|\.)/).waitFor();
+log("prefs saved message:", await page.getByText(/Saved and verified( in temporary|\.)/).innerText());
 await page.getByRole("button", { name: /Reset to defaults/ }).click();
 log("reset dialog shown:", await page.getByRole("alertdialog").isVisible());
 await page.screenshot({ path: `${SHOTS}/journey-5-reset-confirm-390.png`, fullPage: true });
@@ -109,6 +109,21 @@ await page.keyboard.press("Tab");
 const focusOutline = await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle);
 log("focus outline style on first tab stop:", focusOutline, "->", await page.evaluate(() => document.activeElement.textContent?.trim().slice(0, 30)));
 log("console errors during journey:", errors.length, JSON.stringify(errors.slice(0, 5)));
+
+// 2b. Multi-exam plan on a phone: many proposed changes must still fit and stay readable
+{
+  const mctx = await browser.newContext({ viewport: { width: 360, height: 780 }, hasTouch: true, isMobile: true });
+  const mp = await mctx.newPage();
+  await mp.goto(BASE);
+  await mp.getByRole("textbox").fill("I have a DBMS exam on Friday and a DAA exam on Monday. I need 4 hours of DBMS and 3 hours of DAA.");
+  await mp.getByRole("button", { name: /Plan it/ }).click();
+  await mp.getByRole("heading", { name: /Review these/ }).waitFor({ timeout: 15000 });
+  log("multi-exam approval heading:", await mp.getByRole("heading", { name: /Review these/ }).innerText());
+  log("multi-exam 'What I understood' shown:", await mp.getByText("What I understood").isVisible());
+  log("multi-exam overflow @360:", await overflow(mp));
+  await mp.screenshot({ path: `${SHOTS}/multi-exam-360.png`, fullPage: true });
+  await mctx.close();
+}
 
 // 3. Desktop journey screenshot
 const d = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

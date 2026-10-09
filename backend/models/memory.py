@@ -1,6 +1,5 @@
 from datetime import datetime
 import re
-from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 VALID_DAYS = {
