@@ -182,8 +182,15 @@ class SecurityMiddleware:
                     user_id = None
             if user_id is None:
                 user_id, set_cookie_value = new_session_cookie()
-                if not path.startswith("/api/"):
-                    # Only API calls create sessions; static files stay cookie-free.
+                # Issue the session on the page load itself (and on API calls), so the
+                # browser holds one session before the app fires parallel API requests.
+                # Otherwise each parallel first request would mint a different session and
+                # a late response could replace the one that owns a pending approval.
+                # Static files and the health check stay cookie-free.
+                last_segment = path.rsplit("/", 1)[-1]
+                if path.startswith("/assets/") or path == "/health" or (
+                    not path.startswith("/api/") and "." in last_segment
+                ):
                     set_cookie_value = None
 
         # 3. Rate limit state-changing API calls.

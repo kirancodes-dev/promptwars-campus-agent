@@ -1,6 +1,6 @@
 # Deploying CampusPilot AI to Google Cloud Run
 
-> **Nothing in this guide has been executed.** No Google Cloud resources exist for this project yet. Run these commands only after you decide to deploy. Commands that create resources or may incur cost are marked 💳.
+> These steps were used for the live deployment on 2026-10-09 (project `promptwar-7576f`, region `asia-south1`). Commands that create resources or may incur cost are marked 💳.
 
 One container serves the built React app and the FastAPI API on `$PORT` (Cloud Run sets it; default 8080).
 
@@ -121,12 +121,19 @@ gcloud run deploy "${SERVICE}" \
   --cpu=1 --memory=512Mi \
   --min-instances=0 --max-instances=1 \
   --concurrency=40 --timeout=60 \
-  --set-env-vars="APP_ENV=production,IDENTITY_MODE=session,FIRESTORE_ENABLED=false,GEMINI_MODEL=gemini-2.5-flash" \
+  --execution-environment=gen2 \
+  --set-env-vars="APP_ENV=production,IDENTITY_MODE=session,FIRESTORE_ENABLED=false,GEMINI_MODEL=gemini-2.5-flash,TZ=Asia/Kolkata,GRPC_DNS_RESOLVER=native" \
   --set-secrets="SESSION_SECRET=campuspilot-session-secret:latest"
 ```
 
 Add Gemini: append `--set-secrets="GEMINI_API_KEY=campuspilot-gemini-key:latest"` (use `--update-secrets` on an existing service).
 Add Firestore: `--update-env-vars="FIRESTORE_ENABLED=true,FIRESTORE_PROJECT_ID=${PROJECT_ID}"`.
+
+Why these settings (learned from the live deployment on 2026-10-09):
+
+- `--execution-environment=gen2` is required with Firestore. On the default first-generation sandbox every Firestore call took 1–5 s, plan requests took ~55 s and approvals hit the 60 s timeout; on gen2 the same requests take about 0.3–1.1 s.
+- `GRPC_DNS_RESOLVER=native` is set as well. It made Firestore reads fast in an in-region Cloud Build test, but on its own it did not fix Cloud Run; gen2 did.
+- `TZ=Asia/Kolkata` makes "today/tomorrow" and default study times follow Indian time instead of UTC. Change it for other audiences.
 
 `--min-instances=0` scales to zero when idle (lowest cost). With in-memory storage this also wipes data and pending approvals; the UI shows "Temporary" storage. Cloud Run uses the container's `/health` only if you configure a probe; the Dockerfile `HEALTHCHECK` is for local Docker. Optional startup probe:
 
@@ -194,4 +201,5 @@ gcloud iam service-accounts delete "${RUNTIME_SA}"
 | Status shows "Temporary" storage with Firestore enabled (`memory_fallback`) | Firestore API not enabled, database missing, or missing `roles/datastore.user` |
 | Planner shows "Built-in planner" with a key set | Secret not mounted as `GEMINI_API_KEY`, or the runtime SA lacks `secretAccessor` |
 | Approval returns "no longer available" | Instance restarted or scaled to zero; run the goal again |
+| Requests take tens of seconds / approvals time out (504) | Service running on the first-generation environment; redeploy with `--execution-environment=gen2` |
 | Everyone loses sessions after deploy | `SESSION_SECRET` not set (random key per instance) |

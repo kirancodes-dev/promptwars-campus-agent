@@ -18,6 +18,7 @@ Scope: backend API, agent pipeline, persistence, frontend, configuration. Review
 | 10 | Medium | Missing security headers; API docs exposed in production | **Fixed** — CSP, nosniff, frame-deny, referrer policy; docs off when `APP_ENV=production` |
 | 11 | Low | Unhandled errors could return framework default bodies | **Fixed** — JSON 500 handler without internals |
 | 12 | Low | Google Fonts loaded from a third party | **Fixed** — system font stack; CSP `default-src 'self'` |
+| 15 | Medium | Session race: parallel first API requests each minted a new session; a late response could replace the cookie that owned a pending approval, making approval fail with 404 (found on the live deployment) | **Fixed** — the session cookie is issued on the page load, before any API call; regression tests added. Failure mode was safe: nothing executed |
 | 13 | High (open) | No account authentication | **Open** — needs an identity-provider decision (see README › Security limitations) |
 | 14 | Medium (open) | Approvals/rate limits in process memory → single instance only | **Accepted for demo** — `--max-instances=1` |
 

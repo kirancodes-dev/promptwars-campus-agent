@@ -62,6 +62,69 @@ class TestSessionIsolation(SecurityTestBase):
         self.assertIn("HttpOnly", cookie)
         self.assertIn("SameSite=Lax", cookie)
 
+    def test_page_load_issues_the_session_before_api_calls(self):
+        """Regression: parallel first API calls must not each mint a different session."""
+        from main import FRONTEND_DIR
+
+        if not (FRONTEND_DIR / "index.html").is_file():
+            self.skipTest("frontend/dist not built")
+        page = self.alice.get("/")
+        self.assertIn(f"{SESSION_COOKIE_NAME}=", page.headers.get("set-cookie", ""))
+        # Every API call after the page load reuses that session: no new cookies issued.
+        for path in ("/api/agent/status", "/api/agent/memory", "/api/agent/workflows", "/api/agent/audit"):
+            self.assertNotIn("set-cookie", self.alice.get(path).headers)
+        data = self.stage(self.alice)
+        self.assertEqual(self.alice.post("/api/agent/approve", json={"approval_id": data["approval_id"]}).status_code, 200)
+
+    def test_concurrent_initial_requests_share_one_session(self):
+        """Regression: after the page load, parallel first requests (as the SPA sends them) use one session."""
+        from concurrent.futures import ThreadPoolExecutor
+        from main import FRONTEND_DIR
+
+        if not (FRONTEND_DIR / "index.html").is_file():
+            self.skipTest("frontend/dist not built")
+        cookie = self.alice.get("/").cookies.get(SESSION_COOKIE_NAME)
+        self.assertTrue(cookie)
+
+        def call(req):
+            client = TestClient(app)
+            client.cookies.set(SESSION_COOKIE_NAME, cookie)
+            method, path = req
+            if method == "POST":
+                return client.post(path, json={"goal": "Prepare for tomorrow: 1 hour of OS"})
+            return client.get(path)
+
+        reqs = [("GET", "/api/agent/status"), ("GET", "/api/agent/memory"), ("GET", "/api/agent/workflows"),
+                ("GET", "/api/agent/audit"), ("POST", "/api/agent/run")]
+        with ThreadPoolExecutor(max_workers=len(reqs)) as pool:
+            responses = list(pool.map(call, reqs))
+        for (method, path), res in zip(reqs, responses):
+            self.assertEqual(res.status_code, 200, path)
+            self.assertNotIn("set-cookie", res.headers, f"{method} {path} minted a new session")
+        approval_id = responses[-1].json()["approval_id"]
+        # The approval created inside the concurrent batch belongs to the page-load session.
+        self.assertEqual(self.alice.post("/api/agent/approve", json={"approval_id": approval_id}).status_code, 200)
+        self.assertEqual(self.bob.post("/api/agent/approve", json={"approval_id": approval_id}).status_code, 404)
+
+    def test_forged_cookie_on_page_load_is_replaced(self):
+        client = TestClient(app)
+        client.cookies.set(SESSION_COOKIE_NAME, "0" * 32 + ".forged")
+        res = client.get("/")
+        self.assertIn(f"{SESSION_COOKIE_NAME}=", res.headers.get("set-cookie", ""))
+        self.assertNotIn("0" * 32 + ".forged", res.headers.get("set-cookie", ""))
+
+    def test_static_files_and_health_stay_cookie_free(self):
+        for path in ("/health", "/favicon.svg", "/assets/missing.js"):
+            self.assertNotIn("set-cookie", TestClient(app).get(path).headers, path)
+
+    def test_late_parallel_session_cannot_hijack_pending_approval_lookup(self):
+        """Simulates the race: a stale parallel response replaces the cookie -> approval is 404, never executed."""
+        data = self.stage(self.alice)
+        stray = TestClient(app).get("/api/agent/status").cookies.get(SESSION_COOKIE_NAME)
+        self.alice.cookies.set(SESSION_COOKIE_NAME, stray)
+        self.assertEqual(self.alice.post("/api/agent/approve", json={"approval_id": data["approval_id"]}).status_code, 404)
+        self.assertEqual(self.all_events(), 0)
+
     def test_users_cannot_see_each_others_data(self):
         data = self.stage(self.alice)
         res = self.alice.post("/api/agent/approve", json={"approval_id": data["approval_id"]})

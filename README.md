@@ -99,7 +99,7 @@ backend/
   services/               approvals, identity, persistence (memory/Firestore), memory, audit, gemini
   models/                 Pydantic models (agent, workflow, memory, audit)
   tools/                  tasks, schedule (conflicts, free slots), notes, memory tools
-  **/test_*.py            unittest suites (251 tests)
+  **/test_*.py            unittest suites (256 tests)
 frontend/
   src/App.jsx             app shell, plan/approve flow
   src/components/         UI components
@@ -112,7 +112,7 @@ Dockerfile, .dockerignore
 
 ## Assumptions
 
-- **Time zone.** Dates and times are interpreted in the server's local time zone ("today", "tomorrow" and the default 09:00–21:00 study window use the server clock). Times are stored without a time zone. Cloud Run containers run in UTC unless the `TZ` environment variable is set, and the deployment guide does not set it.
+- **Time zone.** Dates and times are interpreted in the server's local time zone ("today", "tomorrow" and the default 09:00–21:00 study window use the server clock). Times are stored without a time zone. Cloud Run containers run in UTC unless the `TZ` environment variable is set; the deployment guide sets `TZ=Asia/Kolkata`.
 - **No calendar sync.** CampusPilot manages its own tasks, schedule and notes. It does not read from or write to Google Calendar or any other external app.
 - **Storage.** Data is kept in server memory and lost on restart unless Firestore is enabled (`FIRESTORE_ENABLED=true`). If Firestore is requested but fails to start, the app keeps running in memory and reports that storage is not durable.
 - **Single instance.** Pending approvals and rate limits are held in process memory, so the service must run as one instance (`--max-instances=1` on Cloud Run).
@@ -177,7 +177,7 @@ Set `FIRESTORE_ENABLED=true` and `FIRESTORE_PROJECT_ID`, with Application Defaul
 ## Tests
 
 ```bash
-cd backend && ./.venv/bin/python -m unittest discover -s . -p "test_*.py"   # 251 tests
+cd backend && ./.venv/bin/python -m unittest discover -s . -p "test_*.py"   # 256 tests
 cd frontend && npm test && npm run lint && npm run build                   # 21 tests
 ```
 
