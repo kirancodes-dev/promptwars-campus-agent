@@ -1,0 +1,42 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Virtual environments and local dependencies
+.venv
+venv/
+env/
+**/node_modules/
+
+# Build artifacts (ensures fresh build inside container)
+**/dist/
+frontend/dist/
+
+# Python caches and bytecode
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+
+# Environment files and credentials
+**/.env
+**/.env.*
+!**/.env.example
+*service_account*.json
+*service-account*.json
+*firebase*adminsdk*.json
+*credentials*.json
+*.key.json
+*.pem
+
+# Local IDE and OS metadata
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Deployment docs and readmes not needed in runtime image
+deployment/
+README.md
