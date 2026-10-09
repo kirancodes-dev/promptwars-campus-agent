@@ -60,7 +60,7 @@ CampusPilot AI is an academic and productivity assistant for students. It addres
 - **Keeps a human in control.** Every step that would change data waits for the student's explicit approval; read-only steps run on their own.
 - **Verifies results.** After approval, each change is saved once and then read back from storage to confirm it matches what was approved.
 - **Is transparent.** Every workflow, approval, tool result and verification is recorded in an activity history and audit log that the student can open in the app.
-- **Can use Gemini, but doesn't depend on it.** When `GEMINI_API_KEY` is set, Gemini (default `gemini-3.8-flash`) produces the plan as structured JSON. Without a key, or if Gemini fails, the deterministic planner takes over and the app says so. The Gemini path is covered by mocked tests only. It is **disabled in production** and has not run against the live API (see [Gemini](#gemini-optional)).
+- **Can use Gemini, but doesn't depend on it.** When `GEMINI_API_KEY` is set, Gemini (default `gemini-3.8-flash`) produces the plan as structured JSON. Without a key, or if Gemini fails, the deterministic planner takes over and the app says so. The Gemini path is covered by mocked tests. It is **disabled in production**; in a non-public test revision it did not reliably propose study sessions, so it was not released (see [Gemini](#gemini-optional)).
 
 ## The problem
 
@@ -180,18 +180,18 @@ These checks show that the deployed safeguards work as designed. They are not a 
 
 | Check | Result |
 |---|---|
-| Backend tests | **312 passing** (1 optional live-Gemini test skipped). Includes 21 realistic planning scenarios, 36 security tests, and 15 Gemini tests that use a mocked SDK. |
-| Backend coverage (line + branch) | **86%** |
-| Frontend tests | **29 passing**; ESLint clean; production build succeeds |
+| Backend tests | **325 passing** (1 optional live-Gemini test skipped). Includes 21 realistic planning scenarios, 36 security tests, and 15 Gemini tests that use a mocked SDK. |
+| Backend coverage (line + branch) | **87%** |
+| Frontend tests | **31 passing**; ESLint clean; production build succeeds |
 | Frontend coverage | 87.8% lines, 72.9% branches |
 | Accessibility (axe-core 4.10.3, run locally) | **0 violations** across 9 UI states at 390 px and 1440 px |
 | Keyboard-only journey (local) | **30/30** checks |
-| CI | GitHub Actions runs on every push; it passed on the deployed commit `e407c52` |
+| CI | GitHub Actions runs on every push; it passed on the deployed commit `e407c52` and on the latest commit |
 
 ```bash
-cd backend && ./.venv/bin/python -m unittest discover -s . -p "test_*.py"   # 312 tests (1 optional live test skipped)
+cd backend && ./.venv/bin/python -m unittest discover -s . -p "test_*.py"   # 325 tests (1 optional live test skipped)
 pip install -r requirements-dev.txt && python -m coverage run --branch -m unittest discover -s . -p "test_*.py" && python -m coverage report
-cd frontend && npm test && npm run lint && npm run build                   # 29 tests
+cd frontend && npm test && npm run lint && npm run build                   # 31 tests
 npm run test:coverage
 ```
 
@@ -208,7 +208,7 @@ backend/
   services/               approvals, identity, persistence (memory/Firestore), memory, audit, gemini
   models/                 Pydantic models (agent, workflow, memory, audit)
   tools/                  tasks, schedule (conflicts, free slots), notes, memory tools
-  **/test_*.py            unittest suites (312 tests)
+  **/test_*.py            unittest suites (325 tests)
 frontend/
   src/App.jsx             app shell, plan/approve flow
   src/components/         UI components
@@ -296,7 +296,7 @@ Gemini output is treated as untrusted:
 
 Timeouts, quota or authentication errors, and unusable output all fall back to the built-in planner. The plan is then labelled "Built-in planner (AI fallback)" with the reason.
 
-**A live Gemini call has not succeeded in this project.** The only key tried belongs to a Google AI Studio project with no prepaid credits, and its requests returned 402. The integration is covered by mocked tests. An optional live test runs only when `CAMPUSPILOT_LIVE_GEMINI_TEST=1` is set and your own key is configured.
+**Gemini is not released to production.** Real Gemini calls succeeded on a non-public test revision, but for study-planning goals Gemini often proposed no study sessions, so the public app stays on the built-in planner. The code now falls back to the built-in planner when Gemini proposes no changes for a study goal. The integration is covered by mocked tests. An optional live test runs only when `CAMPUSPILOT_LIVE_GEMINI_TEST=1` is set and your own key is configured.
 
 ### Firestore (optional)
 
