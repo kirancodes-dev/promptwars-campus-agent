@@ -160,49 +160,75 @@ def _fmt_time(value: Any) -> str:
     return str(value)
 
 
+def _describe_preferences(p: dict) -> str:
+    fields = [k for k in p if k != "requires_approval"]
+    return "Save study preferences: " + ", ".join(f.replace("preferred_", "").replace("_", " ") for f in fields)
+
+
+_ACTION_FORMATTERS = {
+    "create_schedule": lambda p: f"Add '{p.get('title')}' to your schedule ({_fmt_range(p.get('start_time'), p.get('end_time'))})",
+    "update_schedule": lambda p: f"Change schedule event {p.get('event_id')}",
+    "delete_schedule": lambda p: f"Delete schedule event {p.get('event_id')}",
+    "create_task": lambda p: f"Create task '{p.get('title')}'" + (f" (priority: {p['priority']})" if p.get("priority") else ""),
+    "update_task": lambda p: f"Update task {p.get('task_id')}",
+    "delete_task": lambda p: f"Delete task {p.get('task_id')}",
+    "create_note": lambda p: f"Save note '{p.get('title')}'",
+    "update_note": lambda p: f"Update note {p.get('note_id')}",
+    "delete_note": lambda p: f"Delete note {p.get('note_id')}",
+    "update_student_preferences": _describe_preferences,
+    "reset_student_preferences": lambda _: "Reset all study preferences to defaults",
+}
+
+
 def describe_action(task: AgentTask) -> str:
     """Plain-language description of a protected action for the approval card."""
-    p = task.parameters
-    tool = task.tool
-    if tool == "create_schedule":
-        return f"Add '{p.get('title')}' to your schedule ({_fmt_range(p.get('start_time'), p.get('end_time'))})"
-    if tool == "update_schedule":
-        return f"Change schedule event {p.get('event_id')}"
-    if tool == "delete_schedule":
-        return f"Delete schedule event {p.get('event_id')}"
-    if tool == "create_task":
-        return f"Create task '{p.get('title')}'" + (f" (priority: {p['priority']})" if p.get("priority") else "")
-    if tool == "update_task":
-        return f"Update task {p.get('task_id')}"
-    if tool == "delete_task":
-        return f"Delete task {p.get('task_id')}"
-    if tool == "create_note":
-        return f"Save note '{p.get('title')}'"
-    if tool == "update_note":
-        return f"Update note {p.get('note_id')}"
-    if tool == "delete_note":
-        return f"Delete note {p.get('note_id')}"
-    if tool == "update_student_preferences":
-        fields = [k for k in p if k != "requires_approval"]
-        return "Save study preferences: " + ", ".join(f.replace("preferred_", "").replace("_", " ") for f in fields)
-    if tool == "reset_student_preferences":
-        return "Reset all study preferences to defaults"
-    return task.title
+    formatter = _ACTION_FORMATTERS.get(task.tool or "")
+    return formatter(task.parameters) if formatter else task.title
+
+
+_TOOL_CATEGORY = {
+    "create_schedule": "events", "update_schedule": "events", "delete_schedule": "events",
+    "create_task": "tasks", "update_task": "tasks", "delete_task": "tasks",
+    "create_note": "notes", "update_note": "notes", "delete_note": "notes",
+    "update_student_preferences": "preferences", "reset_student_preferences": "preferences",
+}
 
 
 def _affected_entities(tasks: list[AgentTask]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {"events": [], "tasks": [], "notes": [], "preferences": []}
     for t in tasks:
-        label = str(t.parameters.get("title") or t.title)
-        if t.tool in ("create_schedule", "update_schedule", "delete_schedule"):
-            out["events"].append(label)
-        elif t.tool in ("create_task", "update_task", "delete_task"):
-            out["tasks"].append(label)
-        elif t.tool in ("create_note", "update_note", "delete_note"):
-            out["notes"].append(label)
-        elif t.tool in ("update_student_preferences", "reset_student_preferences"):
-            out["preferences"].append(t.title)
+        cat = _TOOL_CATEGORY.get(t.tool or "")
+        if cat:
+            label = t.title if cat == "preferences" else str(t.parameters.get("title") or t.title)
+            out[cat].append(label)
     return {k: v for k, v in out.items() if v}
+
+
+def _build_approval_requests(
+    protected_tasks: list[AgentTask], batch_id: str, summary: list[str], affected: dict[str, list[str]]
+) -> list[ApprovalRequest]:
+    return [
+        ApprovalRequest(
+            approval_id=approval_store.new_id(),
+            action=describe_action(t),
+            tool_name=t.tool,
+            parameters=t.parameters,
+            status="pending",
+            batch_id=batch_id,
+            actions_summary=summary,
+            affected_entities=affected,
+            step_id=t.id,
+            title=t.title,
+            description=t.description,
+        )
+        for t in protected_tasks
+    ]
+
+
+def _assign_staged_hashes(requests: list[ApprovalRequest], staged: StagedApproval) -> None:
+    for req in requests:
+        req.payload_hash = staged.payload_hash
+        req.expires_at = staged.expires_at
 
 
 def _stage(
@@ -220,22 +246,7 @@ def _stage(
     batch_id = approval_store.new_id()
     summary = [describe_action(t) for t in protected_tasks]
     affected = _affected_entities(protected_tasks)
-    requests = [
-        ApprovalRequest(
-            approval_id=approval_store.new_id(),
-            action=describe_action(t),
-            tool_name=t.tool,
-            parameters=t.parameters,
-            status="pending",
-            batch_id=batch_id,
-            actions_summary=summary,
-            affected_entities=affected,
-            step_id=t.id,
-            title=t.title,
-            description=t.description,
-        )
-        for t in protected_tasks
-    ]
+    requests = _build_approval_requests(protected_tasks, batch_id, summary, affected)
     staged = approval_store.stage(
         user_id=user_id,
         goal=goal,
@@ -246,9 +257,7 @@ def _stage(
         approval_id=batch_id,
         kind=kind,
     )
-    for req in requests:
-        req.payload_hash = staged.payload_hash
-        req.expires_at = staged.expires_at
+    _assign_staged_hashes(requests, staged)
     workflow.approval_id = batch_id
     return staged
 
@@ -328,13 +337,97 @@ def run_agent(
     return result
 
 
+def _run_approved_workflow(
+    orchestrator: AgentOrchestrator, staged: StagedApproval, user_id: str, events: list[dict]
+) -> list[ToolResult]:
+    workflow = staged.workflow
+    orchestrator.log_event(events, "approval_granted", workflow, detail=f"{len(staged.protected_step_ids)} action(s)")
+    try:
+        results = orchestrator.run_workflow(staged.plan, workflow, approved=True, user_id=user_id, events=events)
+    except Exception:
+        logger.exception("Approved workflow crashed")
+        results = [ToolResult(tool_name="workflow", success=False, error="Execution stopped unexpectedly. Check your schedule before retrying.")]
+        workflow.status = "failed"
+        workflow.next_action = "Execution stopped unexpectedly. Some changes may have been saved; review your data before retrying."
+    approval_store.finish(staged, "approved")
+    return results
+
+
+def _record_audit_log(
+    goal: str,
+    plan: AgentPlan,
+    approval_status: str,
+    results: list[ToolResult],
+    execution_status: str,
+    user_id: str,
+    workflow_id: str,
+) -> None:
+    try:
+        AuditService().record_execution(
+            goal=goal,
+            plan=plan,
+            approval_status=approval_status,
+            results=results,
+            execution_status=execution_status,
+            error=next((r.error for r in results if not r.success), None),
+            user_id=user_id,
+            workflow_id=workflow_id,
+        )
+    except Exception as e:
+        logger.warning("Audit summary failed (%s).", type(e).__name__)
+
+
+def _find_primary_result(results: list[ToolResult], protected_tools: set[str]) -> ToolResult | None:
+    for r in results:
+        if not r.success:
+            return r
+    for r in results:
+        if r.tool_name in protected_tools:
+            return r
+    return results[0] if results else None
+
+
+def _build_approved_response(
+    staged: StagedApproval, exec_result: AgentExecutionResult, results: list[ToolResult]
+) -> ApprovalResponse:
+    protected_tools = {t.tool for t in staged.plan.tasks if t.id in staged.protected_step_ids and t.tool}
+    primary_res = _find_primary_result(results, protected_tools)
+    primary_req = staged.approval_requests[0] if staged.approval_requests else None
+    action = primary_req.action if primary_req else "Batch execution"
+    tool_name = primary_req.tool_name if primary_req else (primary_res.tool_name if primary_res else "batch")
+
+    return ApprovalResponse(
+        approval_id=staged.approval_id,
+        status="approved",
+        action=action,
+        tool_name=tool_name,
+        success=exec_result.status == "completed",
+        tool_result=primary_res,
+        result=primary_res.result if primary_res else None,
+        execution_result=exec_result,
+    )
+
+
+def _apply_workflow_rejection(workflow: WorkflowRecord, orchestrator: AgentOrchestrator, user_id: str) -> None:
+    for step in workflow.steps:
+        if step.status in ("waiting_approval", "planned"):
+            step.status = "rejected" if step.requires_approval else "skipped"
+    workflow.status = "rejected"
+    workflow.next_action = "You rejected the proposed changes. Nothing was changed."
+    workflow.updated_at = datetime.now()
+    events: list[dict] = []
+    orchestrator.log_event(events, "approval_rejected", workflow, status="rejected")
+    orchestrator.flush_events(events, user_id)
+    _save_workflow(workflow, user_id)
+
+
 @router.post(
     "/approve",
     response_model=ApprovalResponse,
     summary="Approve a pending action",
     description=(
-        "Approve and execute exactly the actions that were staged and reviewed. "
-        "Approvals are single-use, expire, and belong to the session that created them."
+        "Execute actions that were held for approval. Once approved, the orchestrator executes "
+        "the staged plan, verifies the state change, and records audit logs."
     ),
 )
 def approve_action(
@@ -358,15 +451,7 @@ def approve_action(
 
     workflow = staged.workflow
     events: list[dict] = []
-    orchestrator.log_event(events, "approval_granted", workflow, detail=f"{len(staged.protected_step_ids)} action(s)")
-    try:
-        results = orchestrator.run_workflow(staged.plan, workflow, approved=True, user_id=user_id, events=events)
-    except Exception:
-        logger.exception("Approved workflow crashed")
-        results = [ToolResult(tool_name="workflow", success=False, error="Execution stopped unexpectedly. Check your schedule before retrying.")]
-        workflow.status = "failed"
-        workflow.next_action = "Execution stopped unexpectedly. Some changes may have been saved; review your data before retrying."
-    approval_store.finish(staged, "approved")
+    results = _run_approved_workflow(orchestrator, staged, user_id, events)
 
     terminal = {
         "completed": "workflow_completed",
@@ -383,35 +468,8 @@ def approve_action(
         update={"approval_id": staged.approval_id, "approval_requests": approved_requests}
     )
 
-    try:
-        AuditService().record_execution(
-            goal=staged.goal,
-            plan=staged.plan,
-            approval_status="approved",
-            results=results,
-            execution_status=exec_result.status,
-            error=next((r.error for r in results if not r.success), None),
-            user_id=user_id,
-            workflow_id=workflow.workflow_id,
-        )
-    except Exception as e:
-        logger.warning("Audit summary failed (%s).", type(e).__name__)
-
-    protected_tools = {t.id: t.tool for t in staged.plan.tasks if t.id in staged.protected_step_ids}
-    protected_results = [r for r in results if r.tool_name in protected_tools.values()]
-    primary_res = next((r for r in results if not r.success), None) or (protected_results[0] if protected_results else (results[0] if results else None))
-    primary_req = staged.approval_requests[0] if staged.approval_requests else None
-
-    return ApprovalResponse(
-        approval_id=staged.approval_id,
-        status="approved",
-        action=primary_req.action if primary_req else "Batch execution",
-        tool_name=primary_req.tool_name if primary_req else (primary_res.tool_name if primary_res else "batch"),
-        success=exec_result.status == "completed",
-        tool_result=primary_res,
-        result=primary_res.result if primary_res else None,
-        execution_result=exec_result,
-    )
+    _record_audit_log(staged.goal, staged.plan, "approved", results, exec_result.status, user_id, workflow.workflow_id)
+    return _build_approved_response(staged, exec_result, results)
 
 
 @router.post(
@@ -429,18 +487,8 @@ def reject_action(payload: RejectActionRequest) -> ApprovalResponse:
         raise _approval_http_error(e)
 
     workflow = staged.workflow
-    for step in workflow.steps:
-        if step.status in ("waiting_approval", "planned"):
-            step.status = "rejected" if step.requires_approval else "skipped"
-    workflow.status = "rejected"
-    workflow.next_action = "You rejected the proposed changes. Nothing was changed."
-    workflow.updated_at = datetime.now()
-
     orchestrator = AgentOrchestrator()
-    events: list[dict] = []
-    orchestrator.log_event(events, "approval_rejected", workflow, status="rejected")
-    orchestrator.flush_events(events, user_id)
-    _save_workflow(workflow, user_id)
+    _apply_workflow_rejection(workflow, orchestrator, user_id)
 
     rejected_requests = [r.model_copy(update={"status": "rejected"}) for r in staged.approval_requests]
     rejected_tools = [r.tool_name for r in staged.approval_requests]
@@ -459,19 +507,7 @@ def reject_action(payload: RejectActionRequest) -> ApprovalResponse:
         planner_note=workflow.planner_note,
     )
 
-    try:
-        AuditService().record_execution(
-            goal=staged.goal,
-            plan=staged.plan,
-            approval_status="rejected",
-            results=[],
-            execution_status="rejected",
-            user_id=user_id,
-            workflow_id=workflow.workflow_id,
-        )
-    except Exception as e:
-        logger.warning("Audit summary failed (%s).", type(e).__name__)
-
+    _record_audit_log(staged.goal, staged.plan, "rejected", [], "rejected", user_id, workflow.workflow_id)
     primary_req = staged.approval_requests[0] if staged.approval_requests else None
     return ApprovalResponse(
         approval_id=staged.approval_id,

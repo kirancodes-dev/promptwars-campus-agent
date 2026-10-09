@@ -19,8 +19,12 @@ VAGUE_GOALS = {
     "help",
 }
 
-_STUDY_VERBS = ("organize", "organise", "preparation", "prepare", "study plan", "plan my study", "revise", "revision", "study for")
-_DURATION = re.compile(r"\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)\b")
+_STUDY_VERBS = (
+    "organize", "organise", "preparation", "prepare", "study plan", "plan my study",
+    "revise", "revision", "study for"
+)
+_NUM_WORD = r"(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|half\s*(?:an?|a)|an?)"
+_DURATION = re.compile(r"\b" + _NUM_WORD + r"\s*(?:hours?|hrs?|minutes?|mins?)\b", re.IGNORECASE)
 _EXAM_WORDS = re.compile(r"\b(?:exam|exams|test|quiz|midterm|mid-term|finals?|viva)\b")
 _KNOWN_SUBJECTS = re.compile(r"\b(?:dbms|daa|os|cn|dsa|ml|ai|math|maths|physics|chemistry)\b")
 
@@ -42,9 +46,34 @@ def _is_review_and_revise(t: str) -> bool:
 
 def _is_smart_study(t: str) -> bool:
     """A study-planning request with something concrete to plan: durations, exams, a meeting or subjects."""
-    concrete = bool(_DURATION.search(t) or _EXAM_WORDS.search(t) or "meeting" in t or _KNOWN_SUBJECTS.search(t))
-    asks_for_plan = _has(t, *_STUDY_VERBS) or bool(_EXAM_WORDS.search(t) and _DURATION.search(t))
+    if t.startswith(("create a task", "create task", "add a task", "add task", "new task", "remind me to")):
+        return False
+    if t.startswith("schedule ") and not _has(t, "study schedule", "schedule my study", "schedule revision", "study sessions"):
+        return False
+    concrete = bool(
+        _DURATION.search(t)
+        or _EXAM_WORDS.search(t)
+        or "meeting" in t
+        or _KNOWN_SUBJECTS.search(t)
+        or _has(t, "revision session", "revision sessions", "study session", "study sessions", "two subjects", "subjects")
+    )
+    asks_for_plan = (
+        _has(t, *_STUDY_VERBS)
+        or bool(re.search(r"\bplan\b.*\b(?:study|revision|prep|session|block|schedule|exam|two|hours?|hrs?)", t))
+        or bool(re.search(r"\b(?:study|revision|prep)\b.*\bplan\b", t))
+        or ("need" in t and bool(_DURATION.search(t)))
+        or (bool(_EXAM_WORDS.search(t)) and any(w in t for w in ("prioritize", "earliest", "prepare", "study", "plan")))
+        or _has(t, "revision session", "revision sessions", "study session", "study sessions")
+    )
     return asks_for_plan and concrete
+
+
+def _is_task_and_schedule(t: str) -> bool:
+    return bool(_has(t, "task", "to-do") and _has(t, "schedule", "study block", "session") and _has(t, "and", "then"))
+
+
+def _is_explain_assumptions(t: str) -> bool:
+    return bool(_has(t, "explain", "what are", "show", "describe", "list") and _has(t, "assumption", "assumptions"))
 
 
 def _is_note_search(t: str) -> bool:
@@ -62,21 +91,24 @@ def _is_preference_update(t: str) -> bool:
 _RULES: list[tuple[str, Callable[[str], bool]]] = [
     ("chained preference and study plan", _is_chained_preference),
     ("review and plan revision", _is_review_and_revise),
-    ("smart study planning", _is_smart_study),
+    ("task and schedule creation", _is_task_and_schedule),
+    ("explain assumptions", _is_explain_assumptions),
+    ("preference reset", lambda t: _has(t, "reset my preferences", "reset preferences", "clear my preferences",
+                                        "clear preferences", "reset memory")),
+    ("preference update", _is_preference_update),
+    ("preference listing", lambda t: _has(t, "show my preferences", "show preferences", "get my preferences", "view preferences",
+                                          "list preferences", "what are my preferences", "my study preferences", "show memory",
+                                          "view memory", "get memory")),
     ("task listing", lambda t: _has(t, "show my tasks", "list my tasks", "get my tasks", "view my tasks", "show tasks",
                                     "list tasks", "get tasks", "what are my tasks", "all tasks")),
     ("schedule listing", lambda t: _has(t, "what is on my schedule", "show my schedule", "view my schedule", "list my schedule",
                                         "get my schedule", "check my schedule", "show schedule", "list schedule", "view schedule",
                                         "my schedule tomorrow")),
     ("note search", _is_note_search),
-    ("preference listing", lambda t: _has(t, "show my preferences", "show preferences", "get my preferences", "view preferences",
-                                          "list preferences", "what are my preferences", "my study preferences", "show memory",
-                                          "view memory", "get memory")),
-    ("preference reset", lambda t: _has(t, "reset my preferences", "reset preferences", "clear my preferences",
-                                        "clear preferences", "reset memory")),
-    ("preference update", _is_preference_update),
+    ("smart study planning", _is_smart_study),
     ("study schedule planning", lambda t: _has(t, "plan my study schedule", "plan study schedule", "study schedule for tomorrow",
-                                               "plan my study for tomorrow", "schedule my study for tomorrow", "plan my study")),
+                                               "plan my study for tomorrow", "schedule my study for tomorrow", "plan my study",
+                                               "create a schedule that respects")),
     ("note creation", lambda t: _has(t, "remember that", "remember:", "take a note", "create a note", "add a note",
                                      "make a note", "save note", "note that")),
     ("schedule creation", lambda t: t.startswith("schedule ") or _has(t, "schedule a ", "schedule an ")),

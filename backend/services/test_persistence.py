@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 import os
 import sys
 import unittest
@@ -6,26 +6,23 @@ import unittest
 # Ensure backend root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from models.agent import AgentTask, Note, ScheduleEvent, UserGoal
+from models.agent import AgentTask, Note, ScheduleEvent
 from services.in_memory import InMemoryPersistence
 from services.persistence import (
-    DEFAULT_USER_ID,
     EntityNotFoundError,
     get_persistence,
     get_persistence_mode,
     reset_persistence,
     set_persistence,
 )
-from tools.notes import clear_notes, create_note, delete_note, get_notes, search_notes, update_note
+from tools.notes import clear_notes
 from tools.schedule import (
-    _events,
     check_schedule_conflict,
     clear_schedule,
     create_schedule,
     find_available_slots,
-    get_schedule,
 )
-from tools.tasks import _tasks, clear_tasks, create_task, delete_task, get_tasks, update_task
+from tools.tasks import _tasks, clear_tasks, create_task, delete_task, get_tasks
 
 
 class TestPersistence(unittest.TestCase):

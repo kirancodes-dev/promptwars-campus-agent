@@ -282,8 +282,18 @@ def _single_day(ctx: _Context, requests: list[tuple[str, int]]) -> AgentPlan:
         ctx.assumptions.append("Your meeting length wasn't given, so I kept 1 hour free for it.")
 
     ordered = sorted(requests, key=lambda r: _PRIORITY_RANK.get(f.priorities.get(r[0])))
-    timing = {s: ctx.pref.subject_time_preferences.get(s, "") for s, _ in ordered}
+    goal_lower = ctx.goal.goal.lower()
+    inferred_timing = (
+        "evening" if "evening" in goal_lower
+        else "morning" if "morning" in goal_lower
+        else "afternoon" if "afternoon" in goal_lower
+        else "night" if "night" in goal_lower
+        else ""
+    )
+    timing = {s: (inferred_timing or ctx.pref.subject_time_preferences.get(s, "")) for s, _ in ordered}
     _common_facts(ctx, [s for s, _ in ordered], multi_day=False)
+    if inferred_timing:
+        ctx.fact("Time of day", inferred_timing, "you said")
     blocks, err = allocate_single_day(ordered, day, calendar, f.explicit_times, timing)
     if err:
         return ctx.clarify(*_error_question(ctx, err))
@@ -399,12 +409,13 @@ def build_study_plan(goal: UserGoal, pref_override: StudentPreferences | None = 
                 "I need one clarification: which subjects should I schedule, and for how long? "
                 "For example: '2 hours of DBMS and 1 hour of DAA'."
             ))
+        limit = 2 if "two subjects" in ctx.goal.goal.lower() else 6
         session = ctx.pref.preferred_session_minutes
-        requests = [(s, session) for s in subjects[:6]]
+        requests = [(s, session) for s in subjects[:limit]]
         source = "your goal" if f.mentioned_subjects else "your saved subjects"
         ctx.assumptions.append(f"No study time was given, so I used your session length ({session} min) for each subject from {source}.")
         if not f.mentioned_subjects:
-            ctx.fact("Subjects", ", ".join(subjects[:6]), "saved preference")
+            ctx.fact("Subjects", ", ".join(subjects[:limit]), "saved preference")
     return _single_day(ctx, requests)
 
 

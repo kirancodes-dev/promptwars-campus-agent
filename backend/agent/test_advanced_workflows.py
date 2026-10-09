@@ -18,9 +18,9 @@ from models.agent import AgentPlan, AgentTask, ToolResult, UserGoal
 from services.audit import AuditService
 from services.in_memory import InMemoryPersistence
 from services.memory import MemoryService
-from services.persistence import get_persistence, reset_persistence, set_persistence
-from tools.schedule import _events, create_schedule
-from tools.tasks import _tasks, create_task
+from services.persistence import reset_persistence, set_persistence
+from tools.schedule import create_schedule
+from tools.tasks import create_task
 
 FLAGSHIP = (
     "Organize my preparation for tomorrow. I need 2 hours of DBMS, 1 hour of DAA, "

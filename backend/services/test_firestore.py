@@ -12,23 +12,18 @@ from agent.orchestrator import AgentOrchestrator
 from models.agent import AgentTask, Note, ScheduleEvent, UserGoal
 from services.firestore import FirestorePersistence, init_firestore
 from services.persistence import (
-    DEFAULT_USER_ID,
-    EntityNotFoundError,
     get_persistence,
-    get_persistence_mode,
     reset_persistence,
     set_persistence,
 )
-from tools.notes import clear_notes, create_note, delete_note, get_notes, search_notes, update_note
+from tools.notes import clear_notes
 from tools.schedule import (
-    _events,
     check_schedule_conflict,
     clear_schedule,
     create_schedule,
     find_available_slots,
-    get_schedule,
 )
-from tools.tasks import _tasks, clear_tasks, create_task, delete_task, get_tasks, update_task
+from tools.tasks import clear_tasks
 
 
 class FakeDocumentSnapshot:

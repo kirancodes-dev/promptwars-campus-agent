@@ -7,7 +7,7 @@ import uuid
 from agent.planning.common import PlannerError
 from agent.planning.preferences_text import extract_preference_updates
 from agent.router import route_tool
-from models.agent import AgentPlan, AgentTask, UserGoal
+from models.agent import AgentPlan, AgentTask, PlanFact, UserGoal
 
 
 def build_task_creation_plan(goal: UserGoal) -> AgentPlan:
@@ -376,4 +376,128 @@ def build_preference_reset_plan(goal: UserGoal) -> AgentPlan:
         summary="Plan to reset study preferences to defaults. Requires approval.",
         tasks=[task],
         requires_approval=True,
+    )
+
+
+def build_task_and_schedule_plan(goal: UserGoal) -> AgentPlan:
+    """Build plan for creating a task AND scheduling a study block."""
+    raw = goal.goal.strip()
+    raw_lower = raw.lower()
+    now = datetime.now()
+    has_tomorrow = "tomorrow" in raw_lower
+    target_date = now + timedelta(days=1) if has_tomorrow else now
+
+    times: list[datetime] = []
+    for m in re.finditer(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)", raw, re.IGNORECASE):
+        hr = int(m.group(1))
+        mn = int(m.group(2) or 0)
+        mer = m.group(3).lower()
+        if mer == "pm" and hr < 12:
+            hr += 12
+        elif mer == "am" and hr == 12:
+            hr = 0
+        times.append(target_date.replace(hour=hr, minute=mn, second=0, microsecond=0))
+
+    if len(times) >= 2:
+        start_time, end_time = times[0], times[1]
+    elif len(times) == 1:
+        start_time = times[0]
+        end_time = start_time + timedelta(hours=2)
+    else:
+        start_time = target_date.replace(hour=18, minute=0, second=0, microsecond=0)
+        end_time = start_time + timedelta(hours=2)
+
+    match_subj = re.search(r"\b(dbms|daa|os|cn|dsa|math|physics|chemistry)\b", raw_lower)
+    subject = match_subj.group(1).upper() if match_subj else "Study"
+
+    task_title = f"{subject} Preparation" if subject != "Study" else "Study Block Task"
+    event_title = f"{subject} Study Block" if subject != "Study" else "Study Block"
+
+    task_call = route_tool(
+        "create_task",
+        {"title": task_title, "description": f"Focus session for {subject}.", "priority": "high", "requires_approval": True},
+    )
+    sched_call = route_tool(
+        "create_schedule",
+        {"title": event_title, "start_time": start_time, "end_time": end_time, "requires_approval": True},
+    )
+
+    task_id_1 = f"plan_task_{uuid.uuid4().hex[:8]}"
+    task_id_2 = f"plan_task_{uuid.uuid4().hex[:8]}"
+
+    plan_task_1 = AgentTask(
+        id=task_id_1,
+        title=f"Create task: {task_title}",
+        description=f"Add '{task_title}' to your task list.",
+        tool=task_call.tool_name,
+        parameters=task_call.parameters,
+        requires_approval=True,
+    )
+    plan_task_2 = AgentTask(
+        id=task_id_2,
+        title=f"Schedule study block: {event_title}",
+        description=f"Schedule '{event_title}' from {start_time.strftime('%I:%M %p').lstrip('0')} to {end_time.strftime('%I:%M %p').lstrip('0')}.",
+        tool=sched_call.tool_name,
+        parameters=sched_call.parameters,
+        requires_approval=True,
+        depends_on=[task_id_1],
+    )
+
+    summary = (
+        f"Plan to create task '{task_title}' and schedule '{event_title}' "
+        f"from {start_time.strftime('%I:%M %p').lstrip('0')} to {end_time.strftime('%I:%M %p').lstrip('0')}."
+    )
+
+    return AgentPlan(
+        goal=goal.goal,
+        summary=summary,
+        tasks=[plan_task_1, plan_task_2],
+        requires_approval=True,
+    )
+
+
+def build_explain_assumptions_plan(goal: UserGoal) -> AgentPlan:
+    """Build plan explaining the planning assumptions and memory preferences."""
+    from services.memory import MemoryService
+    try:
+        pref = MemoryService().get_preferences()
+    except Exception:
+        from models.memory import StudentPreferences
+        pref = StudentPreferences()
+
+    window_str = f"{pref.preferred_study_start}–{pref.preferred_study_end}"
+    session_str = f"{pref.preferred_session_minutes} min"
+    break_str = f"{pref.preferred_break_minutes} min"
+
+    assumptions = [
+        f"Study window is {window_str} based on your saved study preferences.",
+        f"Standard session length is {session_str} with a {break_str} break between sessions.",
+        "Existing events on your schedule are never moved or overwritten.",
+        "Earliest exam deadlines are prioritized first to prevent last-minute cramming.",
+        "No study sessions are scheduled on an exam day itself.",
+    ]
+    understanding = [
+        PlanFact(label="Study window", value=window_str, source="saved preference"),
+        PlanFact(label="Session length", value=session_str, source="saved preference"),
+        PlanFact(label="Break length", value=break_str, source="saved preference"),
+    ]
+
+    task = AgentTask(
+        id=f"plan_task_{uuid.uuid4().hex[:8]}",
+        title="Review planning assumptions",
+        description="Explains the assumptions and constraints CampusPilot uses to construct your schedule.",
+    )
+
+    summary = (
+        f"CampusPilot planning assumptions: study window {window_str}, {session_str} sessions, "
+        f"{break_str} breaks. No study on exam days, and existing events are preserved."
+    )
+
+    return AgentPlan(
+        goal=goal.goal,
+        summary=summary,
+        tasks=[task],
+        requires_approval=False,
+        understanding=understanding,
+        assumptions=assumptions,
     )

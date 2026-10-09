@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from services.gemini import (
     CAMPUSPILOT_SYSTEM_PROMPT,
     GeminiConfigurationError,
-    GeminiResponseError,
     GeminiService,
     GeminiServiceError,
     build_planning_prompt,

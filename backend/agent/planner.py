@@ -12,6 +12,7 @@ The work is split into cohesive modules under agent/planning/:
 """
 
 from agent.planning.builders import (
+    build_explain_assumptions_plan,
     build_general_plan,
     build_listing_plan,
     build_note_creation_plan,
@@ -20,6 +21,7 @@ from agent.planning.builders import (
     build_preference_update_plan,
     build_schedule_creation_plan,
     build_search_plan,
+    build_task_and_schedule_plan,
     build_task_creation_plan,
 )
 from agent.planning.common import PlannerError, clarification_plan
@@ -47,6 +49,8 @@ _BUILDERS = {
     "review and plan revision": build_study_plan,
     "study schedule planning": build_study_plan,
     "chained preference and study plan": build_chained_preference_and_study_plan,
+    "task and schedule creation": build_task_and_schedule_plan,
+    "explain assumptions": build_explain_assumptions_plan,
     "preference update": build_preference_update_plan,
     "preference listing": build_preference_listing_plan,
     "preference reset": build_preference_reset_plan,

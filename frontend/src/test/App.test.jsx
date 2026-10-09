@@ -34,9 +34,19 @@ beforeEach(() => {
   vi.mocked(api.resetPreferences).mockReset();
 });
 
+async function renderApp() {
+  const result = render(<App />);
+  await screen.findByRole("heading", { level: 1 });
+  await waitFor(() => {
+    expect(api.getAgentStatus).toHaveBeenCalled();
+    expect(api.getStudentPreferences).toHaveBeenCalled();
+  });
+  return result;
+}
+
 async function planFlagship(user) {
   vi.mocked(api.runAgent).mockResolvedValue(FLAGSHIP_RESULT_WAITING);
-  render(<App />);
+  await renderApp();
   await user.click(screen.getByRole("button", { name: /Plan tomorrow's study \(demo\)/ }));
   await user.click(screen.getByRole("button", { name: /Plan it/ }));
   return screen.findByRole("heading", { name: /Review these 2 changes/ });
@@ -45,7 +55,7 @@ async function planFlagship(user) {
 describe("goal entry", () => {
   it("validates an empty goal without calling the API", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
     await user.click(screen.getByRole("button", { name: /Plan it/ }));
     expect(await screen.findByText(/Describe what you want to get done/)).toBeTruthy();
     expect(api.runAgent).not.toHaveBeenCalled();
@@ -53,7 +63,7 @@ describe("goal entry", () => {
 
   it("example goals fill the box but do not submit", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
     await user.click(screen.getByRole("button", { name: /Plan tomorrow's study \(demo\)/ }));
     expect(screen.getByRole("textbox", { name: /What do you want to get done/ }).value).toMatch(/2 hours of DBMS/);
     expect(api.runAgent).not.toHaveBeenCalled();
@@ -62,7 +72,7 @@ describe("goal entry", () => {
   it("shows an actionable error when the API fails", async () => {
     const user = userEvent.setup();
     vi.mocked(api.runAgent).mockRejectedValue(new api.ApiError("Can't reach CampusPilot.", { kind: "network" }));
-    render(<App />);
+    await renderApp();
     await user.type(screen.getByRole("textbox", { name: /What do you want to get done/ }), "Show my tasks");
     await user.click(screen.getByRole("button", { name: /Plan it/ }));
     const alert = await screen.findByRole("alert");
@@ -153,15 +163,15 @@ describe("explanations", () => {
       planner_mode: "deterministic_fallback",
       planner_note: "AI planning is unavailable right now, so CampusPilot's built-in planner was used instead.",
     });
-    render(<App />);
+    await renderApp();
     await user.click(screen.getByRole("button", { name: /Plan tomorrow's study \(demo\)/ }));
     await user.click(screen.getByRole("button", { name: /Plan it/ }));
     expect(await screen.findByText("Built-in planner (AI fallback)")).toBeTruthy();
     expect(screen.getByText(/AI planning is unavailable right now/)).toBeTruthy();
   });
 
-  it("has exactly one level-one heading", () => {
-    render(<App />);
+  it("has exactly one level-one heading", async () => {
+    await renderApp();
     expect(screen.getAllByRole("heading", { level: 1 }).map((h) => h.textContent)).toEqual(["CampusPilot AI"]);
   });
 });
@@ -169,7 +179,7 @@ describe("explanations", () => {
 describe("preferences", () => {
   it("validates edits client-side before saving", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
     await user.click(await screen.findByRole("button", { name: /^Edit$/ }));
     const end = screen.getByLabelText("Latest end");
     await user.clear(end);
@@ -182,7 +192,7 @@ describe("preferences", () => {
   it("requires explicit confirmation before resetting", async () => {
     const user = userEvent.setup();
     vi.mocked(api.resetPreferences).mockResolvedValue({ ...PREFS, verified: true });
-    render(<App />);
+    await renderApp();
     await user.click(await screen.findByRole("button", { name: /Reset to defaults/ }));
     expect(api.resetPreferences).not.toHaveBeenCalled();
     const dialog = screen.getByRole("alertdialog");
@@ -199,7 +209,7 @@ describe("preferences", () => {
 describe("navigation and status", () => {
   it("bottom navigation switches sections", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
     const nav = screen.getByRole("navigation", { name: "Sections" });
     await user.click(within(nav).getByRole("button", { name: /Activity/ }));
     expect(within(nav).getByRole("button", { name: /Activity/ }).getAttribute("aria-current")).toBe("page");
@@ -207,7 +217,7 @@ describe("navigation and status", () => {
 
   it("status panel explains demo storage honestly", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
     await user.click(await screen.findByRole("button", { name: /show system status/ }));
     expect(screen.getByText("Built-in planner")).toBeTruthy();
     expect(screen.getByText("Temporary")).toBeTruthy();
@@ -222,7 +232,7 @@ describe("history, read results, saving and offline states", () => {
       { id: "a1", event_type: "approval_granted", timestamp: new Date().toISOString(), tool: null, error_summary: null },
       { id: "a2", event_type: "tool_failed", timestamp: new Date().toISOString(), tool: "create_task", error_summary: "storage down" },
     ]);
-    render(<App />);
+    await renderApp();
     const activity = await screen.findByRole("heading", { name: "Activity" });
     const card = activity.closest("section");
     expect(await within(card).findByText(/Organize my preparation/)).toBeTruthy();
@@ -242,7 +252,7 @@ describe("history, read results, saving and offline states", () => {
           result: { tasks: [{ title: "Submit DAA assignment", status: "pending", priority: "high" }] } },
       ] },
     });
-    render(<App />);
+    await renderApp();
     await user.type(screen.getByRole("textbox", { name: /What do you want to get done/ }), "Show my tasks");
     await user.click(screen.getByRole("button", { name: /Plan it/ }));
     expect(await screen.findByText("Submit DAA assignment")).toBeTruthy();
@@ -253,7 +263,7 @@ describe("history, read results, saving and offline states", () => {
   it("saves preferences and reports verified, temporary storage honestly", async () => {
     const user = userEvent.setup();
     vi.mocked(api.savePreferences).mockResolvedValue({ ...PREFS, durable: false, verified: true });
-    render(<App />);
+    await renderApp();
     await user.click(await screen.findByRole("button", { name: /^Edit$/ }));
     await user.click(screen.getByRole("button", { name: /Save preferences/ }));
     expect(await screen.findByText(/Saved and verified in temporary demo storage/)).toBeTruthy();

@@ -2,12 +2,10 @@ import unittest
 from unittest.mock import MagicMock
 
 from agent.orchestrator import AgentOrchestrator
-from agent.router import _TOOL_REGISTRY
 from models.agent import (
     AgentExecutionResult,
     AgentPlan,
     AgentTask,
-    ToolCall,
     ToolResult,
     UserGoal,
 )

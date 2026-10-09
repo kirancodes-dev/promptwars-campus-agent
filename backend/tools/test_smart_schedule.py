@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from agent.orchestrator import AgentOrchestrator
 from agent.planner import plan_goal
-from models.agent import AgentPlan, ScheduleEvent, UserGoal
+from models.agent import AgentPlan, UserGoal
 from tools.notes import clear_notes
 from tools.schedule import (
     _events,

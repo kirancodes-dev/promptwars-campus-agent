@@ -12,7 +12,7 @@ function Field({ id, label, error, children, hint }) {
         {label}
       </label>
       {children}
-      {hint && !error && <p className="mt-1 text-xs text-ink-faint">{hint}</p>}
+      {hint && !error && <p id={`${id}-hint`} className="mt-1 text-xs text-ink-faint">{hint}</p>}
       {error && (
         <p id={`${id}-error`} className="mt-1 text-xs text-rose-300">
           {error}
@@ -238,20 +238,20 @@ export function StudentPreferencesCard({ refreshKey, onChanged }) {
           </h3>
           <div className="grid grid-cols-2 gap-3">
             <Field id={`${uid}-start`} label="Earliest start" error={errors.preferred_study_start}>
-              <input id={`${uid}-start`} type="time" step="900" className={inputClass} value={form.preferred_study_start} onChange={(e) => set("preferred_study_start", e.target.value)} aria-invalid={Boolean(errors.preferred_study_start) || undefined} />
+              <input id={`${uid}-start`} type="time" step="900" className={inputClass} value={form.preferred_study_start} onChange={(e) => set("preferred_study_start", e.target.value)} aria-invalid={Boolean(errors.preferred_study_start) || undefined} aria-describedby={errors.preferred_study_start ? `${uid}-start-error` : undefined} />
             </Field>
             <Field id={`${uid}-end`} label="Latest end" error={errors.preferred_study_end}>
               <input id={`${uid}-end`} type="time" step="900" className={inputClass} value={form.preferred_study_end} onChange={(e) => set("preferred_study_end", e.target.value)} aria-invalid={Boolean(errors.preferred_study_end) || undefined} aria-describedby={errors.preferred_study_end ? `${uid}-end-error` : undefined} />
             </Field>
             <Field id={`${uid}-session`} label="Session (min)" error={errors.preferred_session_minutes}>
-              <input id={`${uid}-session`} type="number" inputMode="numeric" min="15" max="360" step="5" className={inputClass} value={form.preferred_session_minutes} onChange={(e) => set("preferred_session_minutes", e.target.value)} aria-invalid={Boolean(errors.preferred_session_minutes) || undefined} />
+              <input id={`${uid}-session`} type="number" inputMode="numeric" min="15" max="360" step="5" className={inputClass} value={form.preferred_session_minutes} onChange={(e) => set("preferred_session_minutes", e.target.value)} aria-invalid={Boolean(errors.preferred_session_minutes) || undefined} aria-describedby={errors.preferred_session_minutes ? `${uid}-session-error` : undefined} />
             </Field>
             <Field id={`${uid}-break`} label="Break (min)" error={errors.preferred_break_minutes}>
-              <input id={`${uid}-break`} type="number" inputMode="numeric" min="0" max="120" step="5" className={inputClass} value={form.preferred_break_minutes} onChange={(e) => set("preferred_break_minutes", e.target.value)} aria-invalid={Boolean(errors.preferred_break_minutes) || undefined} />
+              <input id={`${uid}-break`} type="number" inputMode="numeric" min="0" max="120" step="5" className={inputClass} value={form.preferred_break_minutes} onChange={(e) => set("preferred_break_minutes", e.target.value)} aria-invalid={Boolean(errors.preferred_break_minutes) || undefined} aria-describedby={errors.preferred_break_minutes ? `${uid}-break-error` : undefined} />
             </Field>
           </div>
 
-          <fieldset>
+          <fieldset aria-describedby={errors.preferred_study_days ? `${uid}-days-error` : undefined}>
             <legend className="mb-1.5 text-sm font-medium text-ink">Study days</legend>
             <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-7">
               {DAYS.map((d) => {
@@ -270,14 +270,14 @@ export function StudentPreferencesCard({ refreshKey, onChanged }) {
                 );
               })}
             </div>
-            {errors.preferred_study_days && <p className="mt-1 text-xs text-rose-300">{errors.preferred_study_days}</p>}
+            {errors.preferred_study_days && <p id={`${uid}-days-error`} className="mt-1 text-xs text-rose-300">{errors.preferred_study_days}</p>}
           </fieldset>
 
           <Field id={`${uid}-subjects`} label="Subjects" hint="Separate with commas, e.g. DBMS, DAA, OS">
-            <input id={`${uid}-subjects`} className={inputClass} value={form.preferred_subjects} onChange={(e) => set("preferred_subjects", e.target.value)} maxLength={400} />
+            <input id={`${uid}-subjects`} className={inputClass} value={form.preferred_subjects} onChange={(e) => set("preferred_subjects", e.target.value)} maxLength={400} aria-describedby={`${uid}-subjects-hint`} />
           </Field>
 
-          <fieldset>
+          <fieldset aria-describedby={errors.timings ? `${uid}-timings-error` : undefined}>
             <legend className="mb-1.5 text-sm font-medium text-ink">Best time of day per subject</legend>
             <ul className="space-y-2">
               {form.timings.map((t, i) => (
@@ -298,7 +298,7 @@ export function StudentPreferencesCard({ refreshKey, onChanged }) {
                 </li>
               ))}
             </ul>
-            {errors.timings && <p className="mt-1 text-xs text-rose-300">{errors.timings}</p>}
+            {errors.timings && <p id={`${uid}-timings-error`} className="mt-1 text-xs text-rose-300">{errors.timings}</p>}
             {form.timings.length < 20 && (
               <Button variant="ghost" icon={Plus} className="mt-1 px-2" onClick={() => set("timings", [...form.timings, { subject: "", when: "evening" }])}>
                 Add subject timing
@@ -307,7 +307,7 @@ export function StudentPreferencesCard({ refreshKey, onChanged }) {
           </fieldset>
 
           <Field id={`${uid}-notes`} label="Planning notes" hint="One per line. Don't include passwords or personal details.">
-            <textarea id={`${uid}-notes`} rows={3} className={cx(inputClass, "py-2.5")} value={form.planning_notes} onChange={(e) => set("planning_notes", e.target.value)} maxLength={2000} />
+            <textarea id={`${uid}-notes`} rows={3} className={cx(inputClass, "py-2.5")} value={form.planning_notes} onChange={(e) => set("planning_notes", e.target.value)} maxLength={2000} aria-describedby={`${uid}-notes-hint`} />
           </Field>
 
           <div className="flex flex-col-reverse gap-2 border-t border-line pt-3 sm:flex-row sm:justify-end">

@@ -1,8 +1,7 @@
-from datetime import date, datetime, time, timedelta
+from datetime import datetime
 import os
 import pathlib
 import sys
-from typing import Any
 import unittest
 
 # Ensure backend root is on sys.path
@@ -14,24 +13,17 @@ from agent.executor import execute_tool
 from agent.orchestrator import AgentOrchestrator
 from agent.planner import plan_goal
 from agent.router import route_tool
-from models.agent import ToolCall, UserGoal
-from models.memory import StudentPreferences, StudentPreferencesUpdate
+from models.agent import UserGoal
+from models.memory import StudentPreferences
 from services.firestore import FirestorePersistence
 from services.in_memory import InMemoryPersistence
 from services.memory import MemoryService
 from services.persistence import (
-    DEFAULT_USER_ID,
-    get_persistence,
     reset_persistence,
     set_persistence,
 )
 from services.test_firestore import FakeFirestoreClient
-from tools.memory import (
-    get_student_preferences,
-    reset_student_preferences,
-    update_student_preferences,
-)
-from tools.schedule import check_schedule_conflict, clear_schedule, create_schedule
+from tools.schedule import clear_schedule
 from tools.tasks import clear_tasks
 
 

@@ -10,15 +10,35 @@ from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 import re
 
+_WORD_NUMBERS: dict[str, float] = {
+    "a": 1.0,
+    "an": 1.0,
+    "one": 1.0,
+    "two": 2.0,
+    "three": 3.0,
+    "four": 4.0,
+    "five": 5.0,
+    "six": 6.0,
+    "seven": 7.0,
+    "eight": 8.0,
+    "nine": 9.0,
+    "ten": 10.0,
+    "half": 0.5,
+    "half an": 0.5,
+    "half a": 0.5,
+}
+
 _DURATION_UNIT = r"(hours?|hrs?|minutes?|mins?)"
-_REQ_FORWARD = re.compile(r"(\d+(?:\.\d+)?)\s*" + _DURATION_UNIT + r"\s+(?:of\s+)?([a-z][a-z0-9+#&\-]*)", re.IGNORECASE)
-_REQ_BACKWARD = re.compile(r"\b([a-z][a-z0-9+#&\-]*)\s+for\s+(\d+(?:\.\d+)?)\s*" + _DURATION_UNIT, re.IGNORECASE)
+_NUM_PATTERN = r"(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|half\s*(?:an?|a)|an?)"
+_REQ_FORWARD = re.compile(r"\b(" + _NUM_PATTERN + r")\s*" + _DURATION_UNIT + r"\s+(?:of\s+)?([a-z][a-z0-9+#&\-]*)", re.IGNORECASE)
+_REQ_BACKWARD = re.compile(r"\b([a-z][a-z0-9+#&\-]*)\s+for\s+(" + _NUM_PATTERN + r")\s*" + _DURATION_UNIT, re.IGNORECASE)
 _NON_SUBJECT_WORDS = {
     "study", "studying", "revision", "revise", "the", "my", "a", "an", "meeting", "meetings",
     "break", "breaks", "sleep", "free", "time", "each", "per", "and", "of", "for", "to",
     "prep", "preparation", "work", "rest", "session", "sessions", "focus", "focused", "total",
     "class", "classes", "lecture", "lectures", "it", "that", "this", "me", "i", "be", "is",
     "exam", "exams", "test", "tests", "quiz", "every", "daily", "today", "tomorrow", "on", "in",
+    "have", "has", "had", "got", "take", "three", "two", "one",
 }
 MAX_STUDY_REQUIREMENTS = 6
 
@@ -27,7 +47,7 @@ _MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
 _MONTH_RE = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*"
 _EXAM_RE = re.compile(r"\b(exam|exams|test|quiz|midterm|mid-term|final|finals|viva)\b")
 _AMBIGUOUS_DATE = re.compile(r"\b(next week|this week|next month|this month|soon|later|sometime|some day|someday|weekend|in a few days)\b")
-_CLAUSE_SPLIT = re.compile(r"[.;,]|\band\b|\bbut\b|\bthen\b")
+_CLAUSE_SPLIT = re.compile(r"[.;,:]|\band\b|\bbut\b|\bthen\b")
 _SUBJECT_STOP = {"my", "the", "an", "a", "final", "finals", "big", "next", "this", "our", "his", "her", "their", "mid", "semester"}
 
 
@@ -58,7 +78,13 @@ def subject_label(word: str) -> str:
 
 
 def _to_minutes(amount: str, unit: str) -> int:
-    value = float(amount)
+    amt_str = amount.strip().lower()
+    value = _WORD_NUMBERS.get(amt_str)
+    if value is None:
+        try:
+            value = float(amt_str)
+        except ValueError:
+            value = 1.0
     return int(round(value * 60)) if unit.lower().startswith("h") else int(round(value))
 
 
@@ -194,6 +220,22 @@ def parse_goal(text: str, today: date) -> GoalFacts:
     facts.requirements = [Requirement(s, m) for s, m in parse_study_requirements(text)]
     req_subjects = {r.subject for r in facts.requirements}
 
+    list_match = re.search(r"\b(?:exams?|tests?|midterms?|finals?)\s*(?:[a-z0-9\s]*):\s*([^.]+)", t)
+    if list_match:
+        for item in re.split(r"[,;]|\band\b", list_match.group(1)):
+            item = item.strip()
+            if not item:
+                continue
+            f_date = find_date(item, today)
+            if f_date:
+                date_idx = item.find(f_date[1])
+                prefix = item[:date_idx] if date_idx != -1 else item
+                words = [w for w in re.findall(r"[a-z][a-z0-9+#&\-]*", prefix) if w not in _SUBJECT_STOP]
+                if words and words[-1] not in _NON_SUBJECT_WORDS:
+                    s_label = subject_label(words[-1])
+                    facts.exams.setdefault(s_label, f_date[0])
+                    facts.exam_phrases.setdefault(s_label, f_date[1])
+
     for clause in _clauses(t):
         subj = _exam_subject(clause)
         found = find_date(clause, today)
@@ -202,7 +244,7 @@ def parse_goal(text: str, today: date) -> GoalFacts:
             facts.exam_phrases.setdefault(subj, found[1])
         elif found and "meeting" in clause:
             facts.meeting_date = found[0]
-        elif found and facts.target_date is None:
+        elif found and facts.target_date is None and not facts.exams:
             facts.target_date, facts.target_date_phrase = found
         # Priorities stated in the same clause as a subject.
         for subject in req_subjects | set(facts.exams):
@@ -211,9 +253,11 @@ def parse_goal(text: str, today: date) -> GoalFacts:
                     facts.priorities[subject] = "high"
                 elif re.search(r"\b(low priority|optional|if time permits|if i have time)\b", clause):
                     facts.priorities[subject] = "low"
-        m = re.search(r"\bprioriti[sz]e\s+([a-z][a-z0-9+#&\-]*)", clause)
+        m = re.search(r"\bprioriti[sz]e\s+(?:the\s+)?([a-z][a-z0-9+#&\-]*)", clause)
         if m:
-            facts.priorities[subject_label(m.group(1))] = "high"
+            w = m.group(1).lower()
+            if w not in _SUBJECT_STOP and w not in _NON_SUBJECT_WORDS and w not in ("earliest", "first", "exam", "exams"):
+                facts.priorities[subject_label(m.group(1))] = "high"
 
     if facts.target_date is None and not facts.exams:
         facts.ambiguous_dates = sorted(set(_AMBIGUOUS_DATE.findall(t)))

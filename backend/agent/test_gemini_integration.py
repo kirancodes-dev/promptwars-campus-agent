@@ -127,6 +127,10 @@ class TestGeminiFailuresFallBack(GeminiTestBase):
             "too many steps": good_plan(tool_calls=[{"tool_name": "get_tasks", "parameters": {}}] * 13),
             "oversized summary": good_plan(summary="x" * 5000),
             "other user": good_plan(tool_calls=[{"tool_name": "get_student_preferences", "parameters": {"user_id": "someone-else"}}]),
+            "zero write steps for study goal": good_plan(tool_calls=[
+                {"tool_name": "get_schedule", "parameters": {}},
+                {"tool_name": "get_student_preferences", "parameters": {}},
+            ]),
         }
         for name, text in outputs.items():
             with self.subTest(name):
@@ -189,6 +193,10 @@ class TestGeminiLive(GeminiTestBase):
         for t in res.plan.tasks:
             if t.tool and t.tool.startswith(("create", "update", "delete")):
                 self.assertTrue(t.requires_approval)
+        self.assertTrue(
+            any(t.tool == "create_schedule" for t in res.plan.tasks),
+            "A study-planning plan must include at least one create_schedule step.",
+        )
         self.assertEqual(self.store.get_events(), [])
 
 
