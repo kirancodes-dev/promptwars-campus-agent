@@ -26,7 +26,7 @@ ENV PYTHONUNBUFFERED=1 \
     APP_ENV=production \
     IDENTITY_MODE=session \
     FRONTEND_DIR=/app/frontend/dist \
-    GEMINI_MODEL=gemini-2.5-flash \
+    GEMINI_MODEL=gemini-3.8-flash \
     FIRESTORE_ENABLED=false
 
 WORKDIR /app

@@ -336,6 +336,12 @@ class TestPlatformHardening(SecurityTestBase):
         self.assertEqual(codes, [200, 200, 200, 429])
         self.assertEqual(TestClient(app).get("/health").status_code, 200)  # non-API routes unaffected
 
+    def test_test_runs_never_load_backend_dotenv(self):
+        """Regression: a real key in backend/.env must not leak into ordinary test runs."""
+        import main
+
+        self.assertTrue(main._running_under_tests())
+
     def test_security_headers(self):
         res = self.alice.get("/api/agent/status")
         self.assertEqual(res.headers["x-content-type-options"], "nosniff")

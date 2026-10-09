@@ -36,7 +36,7 @@ React 19 + Vite + Tailwind SPA → FastAPI (session middleware, rate limits, sec
 
 ## Google technology
 
-- **Gemini 2.5 Flash** (`google-genai`, JSON mode) for planning, behind strict validation with a deterministic fallback. *Integrated and tested with mocks; not exercised against the live API in this repository.*
+- **Gemini** (default `gemini-3.8-flash`, `google-genai`, JSON mode) for planning, behind strict validation with a deterministic fallback. *Integrated and tested with mocks; not exercised against the live API in this repository.*
 - **Cloud Firestore** for durable per-session storage, with bounded queries and batched audit writes. *Verified live on the demo deployment.*
 - **Cloud Run (gen2) + Secret Manager + Artifact Registry/Cloud Build**: live demo in asia-south1, scale to zero, one instance. Steps in `deployment/cloud-run.md`.
 

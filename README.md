@@ -20,7 +20,7 @@ CampusPilot AI is an academic and productivity assistant for students. It addres
 - **Keeps a human in control.** Every step that would change data waits for the student's explicit approval; read-only steps run on their own.
 - **Verifies results.** After approval, each change is saved once and then read back from storage to confirm it matches what was approved.
 - **Is transparent.** Every workflow, approval, tool outcome and verification is recorded in an activity history and audit log visible in the app.
-- **Uses Gemini when configured.** With `GEMINI_API_KEY` set, Gemini 2.5 Flash produces the plan as structured JSON; without a key, or if Gemini fails, a deterministic planner takes over and the app says so. (The Gemini path is tested with mocks; it has not been run against the live API in this repository.)
+- **Uses Gemini when configured.** With `GEMINI_API_KEY` set, Gemini (default `gemini-3.8-flash`) produces the plan as structured JSON; without a key, or if Gemini fails, a deterministic planner takes over and the app says so. (The Gemini path is tested with mocks; it has not been run against the live API in this repository.)
 
 ## The problem
 
@@ -68,7 +68,7 @@ flowchart LR
   FE -->|same-origin /api, session cookie| API[FastAPI]
   API --> ORC[Orchestrator]
   ORC --> PL{Planner}
-  PL -->|GEMINI_API_KEY set| GEM[Gemini 2.5 Flash<br/>structured JSON]
+  PL -->|GEMINI_API_KEY set| GEM[Gemini<br/>structured JSON]
   PL -->|no key / failure| DET[Deterministic planner]
   ORC --> RT[Tool router<br/>allow-list + validation]
   RT --> GATE[Approval gate]
@@ -87,7 +87,7 @@ Details: [docs/architecture.md](docs/architecture.md).
 |---|---|
 | Frontend | React 19, Vite 8, Tailwind CSS 4, lucide-react; Vitest + Testing Library |
 | Backend | Python 3.12, FastAPI, Pydantic 2, uvicorn |
-| AI (optional) | Google Gemini (`gemini-2.5-flash`) via `google-genai`, structured JSON output |
+| AI (optional) | Google Gemini (default `gemini-3.8-flash`, configurable) via `google-genai`, structured JSON output |
 | Storage (optional) | Google Cloud Firestore (`FIRESTORE_ENABLED=true`); in-memory by default |
 | Hosting | Docker image built with Cloud Build → Google Cloud Run (asia-south1, gen2, scale to zero); session secret in Secret Manager |
 | CI | GitHub Actions: backend tests + branch coverage + pyflakes, frontend lint + tests + coverage + build (no credentials, no deploy) |
@@ -159,7 +159,7 @@ All settings are environment variables; see [backend/.env.example](backend/.env.
 | Variable | Default | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | empty | Enables Gemini planning. Empty → built-in planner. |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Model name. |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Model name. `gemini-2.5-flash` is no longer available to new API users. |
 | `FIRESTORE_ENABLED` / `FIRESTORE_PROJECT_ID` | `false` / empty | Durable storage in Firestore. |
 | `IDENTITY_MODE` | `session` | `session` = private anonymous session per browser; `demo` = shared user (local only). |
 | `SESSION_SECRET` | random per process | Signs session cookies. Set in production via Secret Manager. |
@@ -175,7 +175,8 @@ The frontend has no secrets. `VITE_*` variables are public; leave `VITE_API_BASE
 
 1. Create a key in Google AI Studio.
 2. Put it in `backend/.env` as `GEMINI_API_KEY=...` (git-ignored) — never in frontend code or chat.
-3. Restart the backend. The header status panel shows "Planner: Gemini AI".
+3. Optionally set `GEMINI_MODEL` (default `gemini-3.8-flash`).
+4. Restart the backend. The header status panel shows "Planner: Gemini AI". A real request also needs available credits or free-tier quota on the key's Google AI Studio project; otherwise Google returns 402 and the app falls back to the built-in planner.
 
 Gemini output is treated as untrusted: the response must match a strict schema (allowed fields, types, bounded sizes); tool names and parameters go through the same router validation and approval policy as the built-in planner; approval flags from the model are discarded. Timeouts, quota/auth errors and unusable output fall back to the built-in planner, and the plan is labelled "Built-in planner (AI fallback)" with the reason. The live Gemini integration has **not** been exercised (no valid key was available); it is covered by mocked tests, and an optional live test runs only with `CAMPUSPILOT_LIVE_GEMINI_TEST=1` and your own key.
 

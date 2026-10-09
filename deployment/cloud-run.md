@@ -130,7 +130,7 @@ gcloud run deploy "${SERVICE}" \
   --min-instances=0 --max-instances=1 \
   --concurrency=40 --timeout=60 \
   --execution-environment=gen2 \
-  --set-env-vars="APP_ENV=production,IDENTITY_MODE=session,FIRESTORE_ENABLED=false,GEMINI_MODEL=gemini-2.5-flash,TZ=Asia/Kolkata,GRPC_DNS_RESOLVER=native" \
+  --set-env-vars="APP_ENV=production,IDENTITY_MODE=session,FIRESTORE_ENABLED=false,GEMINI_MODEL=gemini-3.8-flash,TZ=Asia/Kolkata,GRPC_DNS_RESOLVER=native" \
   --set-secrets="SESSION_SECRET=campuspilot-session-secret:latest"
 ```
 

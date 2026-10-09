@@ -3,6 +3,7 @@ from http.cookies import SimpleCookie
 import logging
 import os
 from pathlib import Path
+import sys
 import threading
 import time
 
@@ -11,12 +12,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-try:
-    from dotenv import load_dotenv
+def _running_under_tests() -> bool:
+    """True for `python -m unittest` / pytest runs: tests must never pick up a real key from backend/.env."""
+    argv0 = sys.argv[0] if sys.argv else ""
+    return "unittest" in argv0 or "pytest" in argv0 or "pytest" in sys.modules
 
-    load_dotenv(Path(__file__).resolve().parent / ".env")
-except Exception:  # python-dotenv is optional at runtime
-    pass
+
+if os.getenv("CAMPUSPILOT_LOAD_DOTENV", "1") != "0" and not _running_under_tests():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).resolve().parent / ".env")
+    except Exception:  # python-dotenv is optional at runtime
+        pass
 
 from api.agent import router as agent_router
 from services.identity import (

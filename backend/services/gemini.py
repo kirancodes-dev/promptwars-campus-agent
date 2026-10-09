@@ -6,8 +6,9 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-# Default model for interactive assistant (override with the GEMINI_MODEL environment variable)
-GEMINI_MODEL = "gemini-2.5-flash"
+# Default model (override with the GEMINI_MODEL environment variable). gemini-2.5-flash is no
+# longer available to new API users (HTTP 404 observed 2026-10-09), so the default is gemini-3.8-flash.
+GEMINI_MODEL = "gemini-3.8-flash"
 GEMINI_TIMEOUT_MS = 20_000
 
 CAMPUSPILOT_SYSTEM_PROMPT = """You are CampusPilot AI, an autonomous personal assistant for students.

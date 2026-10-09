@@ -166,6 +166,13 @@ class TestModelCannotBypassControls(GeminiTestBase):
         self.assertNotIn(FAKE_KEY, body.text)
 
 
+if os.getenv("CAMPUSPILOT_LIVE_GEMINI_TEST") == "1" and not os.getenv("GEMINI_API_KEY"):
+    # Explicit opt-in only: read the key from backend/.env (never printed).
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+
 @unittest.skipUnless(
     os.getenv("CAMPUSPILOT_LIVE_GEMINI_TEST") == "1" and os.getenv("GEMINI_API_KEY"),
     "Live Gemini test runs only when CAMPUSPILOT_LIVE_GEMINI_TEST=1 and a fresh GEMINI_API_KEY are set.",
@@ -177,7 +184,8 @@ class TestGeminiLive(GeminiTestBase):
         from services.gemini import create_gemini_service
 
         res = self.run_goal(create_gemini_service(), goal="Plan 2 hours of DBMS study tomorrow evening")
-        self.assertIn(res.planner_mode, ("gemini", "deterministic_fallback"))
+        # A real success must come from Gemini itself; a fallback here means the live call failed.
+        self.assertEqual(res.planner_mode, "gemini", res.planner_note)
         for t in res.plan.tasks:
             if t.tool and t.tool.startswith(("create", "update", "delete")):
                 self.assertTrue(t.requires_approval)
@@ -186,3 +194,62 @@ class TestGeminiLive(GeminiTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGeminiModelConfiguration(unittest.TestCase):
+    """GEMINI_MODEL selects the model; no network is used (the SDK client is mocked)."""
+
+    def setUp(self):
+        from api import agent as api_agent
+
+        api_agent._gemini_cache.clear()
+
+    def _service(self, env):
+        from services.gemini import create_gemini_service
+
+        with patch.dict(os.environ, env, clear=False), patch("services.gemini.genai.Client") as client_cls:
+            for k in ("GEMINI_MODEL",):
+                if k not in env:
+                    os.environ.pop(k, None)
+            return create_gemini_service(), client_cls
+
+    def test_default_model_is_current(self):
+        from services.gemini import GEMINI_MODEL
+
+        self.assertEqual(GEMINI_MODEL, "gemini-3.8-flash")
+        svc, _ = self._service({"GEMINI_API_KEY": FAKE_KEY})
+        self.assertEqual(svc.model, "gemini-3.8-flash")
+
+    def test_model_from_environment(self):
+        svc, _ = self._service({"GEMINI_API_KEY": FAKE_KEY, "GEMINI_MODEL": "gemini-test-model"})
+        self.assertEqual(svc.model, "gemini-test-model")
+
+    def test_blank_model_falls_back_to_default(self):
+        svc, _ = self._service({"GEMINI_API_KEY": FAKE_KEY, "GEMINI_MODEL": "   "})
+        self.assertEqual(svc.model, "gemini-3.8-flash")
+
+    def test_missing_or_placeholder_key_means_no_service(self):
+        for key in ("", "   ", "your_gemini_api_key_here", "REPLACE_ME"):
+            svc, client_cls = self._service({"GEMINI_API_KEY": key})
+            self.assertIsNone(svc, key)
+            client_cls.assert_not_called()
+
+    def test_configured_model_is_used_for_requests(self):
+        client = MagicMock()
+        client.models.generate_content.return_value = MagicMock(text=good_plan())
+        GeminiService(client=client, model="gemini-test-model").generate_json("plan")
+        self.assertEqual(client.models.generate_content.call_args.kwargs["model"], "gemini-test-model")
+
+    def test_service_cache_follows_model_changes(self):
+        from api.agent import get_gemini_service_safe
+
+        with patch("services.gemini.genai.Client"):
+            with patch.dict(os.environ, {"GEMINI_API_KEY": FAKE_KEY, "GEMINI_MODEL": "model-a"}):
+                self.assertEqual(get_gemini_service_safe().model, "model-a")
+            with patch.dict(os.environ, {"GEMINI_API_KEY": FAKE_KEY, "GEMINI_MODEL": "model-b"}):
+                self.assertEqual(get_gemini_service_safe().model, "model-b")
+
+    def test_model_name_never_exposes_the_key(self):
+        svc, _ = self._service({"GEMINI_API_KEY": FAKE_KEY, "GEMINI_MODEL": "gemini-test-model"})
+        self.assertNotIn(FAKE_KEY, repr(svc))
+        self.assertNotIn(FAKE_KEY, str(svc))
