@@ -177,7 +177,7 @@ describe("explanations", () => {
 });
 
 describe("preferences", () => {
-  it("validates edits client-side before saving", async () => {
+  it("validates edits client-side before saving, focuses invalid field, and binds aria-describedby", async () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await screen.findByRole("button", { name: /^Edit$/ }));
@@ -186,7 +186,40 @@ describe("preferences", () => {
     await user.type(end, "08:00");
     await user.click(screen.getByRole("button", { name: /Save preferences/ }));
     expect(await screen.findByText(/End time must be after the start time/)).toBeTruthy();
+    expect(document.activeElement).toBe(end);
+    expect(end.getAttribute("aria-invalid")).toBe("true");
+    const descId = end.getAttribute("aria-describedby");
+    expect(descId).toBeTruthy();
+    expect(document.getElementById(descId)?.textContent).toMatch(/End time must be after the start time/);
     expect(api.savePreferences).not.toHaveBeenCalled();
+  });
+
+  it("focuses first invalid field when multiple fields fail validation", async () => {
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await screen.findByRole("button", { name: /^Edit$/ }));
+    const start = screen.getByLabelText("Earliest start");
+    const session = screen.getByLabelText("Session (min)");
+    await user.clear(start);
+    await user.clear(session);
+    await user.type(session, "5");
+    await user.click(screen.getByRole("button", { name: /Save preferences/ }));
+    expect(document.activeElement).toBe(start);
+    expect(start.getAttribute("aria-invalid")).toBe("true");
+    const errId = start.getAttribute("aria-describedby");
+    expect(errId).toBeTruthy();
+    expect(document.getElementById(errId)?.textContent).toMatch(/Choose a start time/);
+    expect(screen.getByText(/Use 15–360 minutes/)).toBeTruthy();
+    expect(api.savePreferences).not.toHaveBeenCalled();
+  });
+
+  it("displays storage failure message when saving preferences fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.savePreferences).mockRejectedValue(new Error("Your preferences could not be saved."));
+    await renderApp();
+    await user.click(await screen.findByRole("button", { name: /^Edit$/ }));
+    await user.click(screen.getByRole("button", { name: /Save preferences/ }));
+    expect(await screen.findByText(/Your preferences could not be saved/)).toBeTruthy();
   });
 
   it("requires explicit confirmation before resetting", async () => {

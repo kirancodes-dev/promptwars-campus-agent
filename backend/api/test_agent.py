@@ -348,5 +348,63 @@ class TestAgentAPI(unittest.TestCase):
         self.assertIn("<!doctype html>", res_spa.text.lower())
 
 
+    def test_storage_failure_audit_history(self):
+        """Storage failure in /audit returns 503 with standard detail."""
+        with patch("services.audit.AuditService.get_logs", side_effect=RuntimeError("disk failure")):
+            res = self.client.get("/api/agent/audit")
+            self.assertEqual(res.status_code, 503)
+            self.assertEqual(res.json(), {"detail": "Audit history is temporarily unavailable."})
+
+    def test_storage_failure_workflow_history(self):
+        """Storage failure in /workflows returns 503 with standard detail."""
+        with patch("api.agent.get_persistence") as mock_get_p:
+            mock_get_p.return_value.list_workflows.side_effect = RuntimeError("db down")
+            res = self.client.get("/api/agent/workflows")
+            self.assertEqual(res.status_code, 503)
+            self.assertEqual(res.json(), {"detail": "Workflow history is temporarily unavailable."})
+
+    def test_storage_failure_get_memory(self):
+        """Storage failure in /memory returns 503 with standard detail."""
+        with patch("services.memory.MemoryService.get_preferences", side_effect=RuntimeError("corrupt")):
+            res = self.client.get("/api/agent/memory")
+            self.assertEqual(res.status_code, 503)
+            self.assertEqual(res.json(), {"detail": "Preferences could not be loaded. Storage is unavailable."})
+
+    def test_storage_failure_get_memory_summary(self):
+        """Storage failure in /memory/summary returns 503 with standard detail."""
+        with patch("services.memory.MemoryService.get_memory_summary", side_effect=RuntimeError("timeout")):
+            res = self.client.get("/api/agent/memory/summary")
+            self.assertEqual(res.status_code, 503)
+            self.assertEqual(res.json(), {"detail": "Preferences could not be loaded. Storage is unavailable."})
+
+    def test_storage_failure_update_memory(self):
+        """Storage failure in /memory/update returns 503 with standard detail."""
+        with patch("services.memory.MemoryService.update_preferences", side_effect=RuntimeError("write failed")):
+            res = self.client.post("/api/agent/memory/update", json={"approved": True, "updates": {"preferred_session_minutes": 45}})
+            self.assertEqual(res.status_code, 503)
+            self.assertEqual(res.json(), {"detail": "Your preferences could not be saved. No successful save was confirmed."})
+
+    def test_storage_failure_reset_memory(self):
+        """Storage failure in /memory/reset returns 503 with standard detail."""
+        with patch("services.memory.MemoryService.reset_preferences", side_effect=RuntimeError("reset failed")):
+            res = self.client.post("/api/agent/memory/reset", json={"confirm": True})
+            self.assertEqual(res.status_code, 503)
+            self.assertEqual(res.json(), {"detail": "Your preferences could not be reset. No successful reset was confirmed."})
+
+    def test_preference_validation_errors(self):
+        """Preference validation errors reject invalid configurations with 400 Bad Request."""
+        res_end = self.client.post("/api/agent/memory/propose", json={"updates": {"preferred_study_start": "18:00", "preferred_study_end": "12:00"}})
+        self.assertEqual(res_end.status_code, 400)
+        self.assertIn("preferred_study_end", res_end.json()["detail"].lower())
+
+        res_sess = self.client.post("/api/agent/memory/propose", json={"updates": {"preferred_session_minutes": 5}})
+        self.assertEqual(res_sess.status_code, 400)
+        self.assertIn("greater than or equal to 15", res_sess.json()["detail"].lower())
+
+        res_days = self.client.post("/api/agent/memory/propose", json={"updates": {"preferred_study_days": ["Funday"]}})
+        self.assertEqual(res_days.status_code, 400)
+        self.assertIn("invalid day", res_days.json()["detail"].lower())
+
+
 if __name__ == "__main__":
     unittest.main()

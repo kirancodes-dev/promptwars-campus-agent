@@ -129,7 +129,25 @@ export function StudentPreferencesCard({ refreshKey, onChanged }) {
     e.preventDefault();
     const errs = validatePreferenceForm(form);
     setErrors(errs);
-    if (Object.keys(errs).length) return;
+    if (Object.keys(errs).length) {
+      if (errs.preferred_study_start) {
+        document.getElementById(`${uid}-start`)?.focus();
+      } else if (errs.preferred_study_end) {
+        document.getElementById(`${uid}-end`)?.focus();
+      } else if (errs.preferred_session_minutes) {
+        document.getElementById(`${uid}-session`)?.focus();
+      } else if (errs.preferred_break_minutes) {
+        document.getElementById(`${uid}-break`)?.focus();
+      } else if (errs.preferred_study_days) {
+        document.querySelector(`fieldset[aria-describedby="${uid}-days-error"] button`)?.focus();
+      } else if (errs.timings) {
+        const firstInvalidIdx = form.timings.findIndex((t) => !t.subject.trim());
+        if (firstInvalidIdx >= 0) {
+          document.getElementById(`${uid}-ts-${firstInvalidIdx}`)?.focus();
+        }
+      }
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -283,7 +301,16 @@ export function StudentPreferencesCard({ refreshKey, onChanged }) {
               {form.timings.map((t, i) => (
                 <li key={i} className="flex items-center gap-2">
                   <label className="sr-only" htmlFor={`${uid}-ts-${i}`}>Subject {i + 1}</label>
-                  <input id={`${uid}-ts-${i}`} className={cx(inputClass, "min-w-0 flex-1")} placeholder="Subject" maxLength={40} value={t.subject} onChange={(e) => set("timings", form.timings.map((x, j) => (j === i ? { ...x, subject: e.target.value } : x)))} />
+                  <input
+                    id={`${uid}-ts-${i}`}
+                    className={cx(inputClass, "min-w-0 flex-1")}
+                    placeholder="Subject"
+                    maxLength={40}
+                    value={t.subject}
+                    onChange={(e) => set("timings", form.timings.map((x, j) => (j === i ? { ...x, subject: e.target.value } : x)))}
+                    aria-invalid={errors.timings && !t.subject.trim() ? true : undefined}
+                    aria-describedby={errors.timings ? `${uid}-timings-error` : undefined}
+                  />
                   <label className="sr-only" htmlFor={`${uid}-tw-${i}`}>Time of day for subject {i + 1}</label>
                   <select id={`${uid}-tw-${i}`} className={cx(inputClass, "w-32 shrink-0")} value={t.when} onChange={(e) => set("timings", form.timings.map((x, j) => (j === i ? { ...x, when: e.target.value } : x)))}>
                     {TIMINGS.map((w) => (

@@ -108,15 +108,8 @@ def plan_goal_with_gemini(goal: UserGoal, gemini_service: Any) -> AgentPlan:
         except Exception as e:
             raise PlannerError(f"Gemini suggested invalid tool call '{call.tool_name[:64]}': {e}", reason="invalid_output") from e
 
-    from agent.planning.intent import detect_intent
-    study_intents = {
-        "smart study planning",
-        "study schedule planning",
-        "chained preference and study plan",
-        "review and plan revision",
-        "task and schedule creation",
-    }
-    if detect_intent(goal.goal) in study_intents and not any(tool_mutates(c.tool_name) for c in routed_calls):
+    from agent.planning.intent import detect_intent, is_study_planning_intent
+    if is_study_planning_intent(detect_intent(goal.goal)) and not any(tool_mutates(c.tool_name) for c in routed_calls):
         raise PlannerError(
             "Gemini generated no write steps for a study planning request.",
             reason="invalid_output",

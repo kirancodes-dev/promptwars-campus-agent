@@ -75,6 +75,11 @@ def _approval_http_error(err: ApprovalError) -> HTTPException:
     return HTTPException(status_code=err.status_code, detail=str(err))
 
 
+def _storage_http_error(operation: str, err: Exception, detail: str, status_code: int = 503) -> HTTPException:
+    logger.warning("Storage operation failed for %s (%s).", operation, type(err).__name__)
+    return HTTPException(status_code=status_code, detail=detail)
+
+
 def _save_workflow(workflow: WorkflowRecord, user_id: str) -> bool:
     """Workflow history is informational: a failure is logged, never hidden as success of a write."""
     try:
@@ -530,8 +535,8 @@ def reject_action(payload: RejectActionRequest) -> ApprovalResponse:
 def get_audit_trail(limit: int = Query(default=50, ge=1, le=200)) -> list[AuditLogEntry]:
     try:
         return AuditService().get_logs(limit=limit)
-    except Exception:
-        raise HTTPException(status_code=503, detail="Audit history is temporarily unavailable.")
+    except Exception as e:
+        raise _storage_http_error("audit_history", e, "Audit history is temporarily unavailable.")
 
 
 @router.get(
@@ -543,8 +548,8 @@ def get_audit_trail(limit: int = Query(default=50, ge=1, le=200)) -> list[AuditL
 def list_workflows(limit: int = Query(default=10, ge=1, le=50)) -> list[WorkflowRecord]:
     try:
         return get_persistence().list_workflows(limit=limit, user_id=current_user_id())
-    except Exception:
-        raise HTTPException(status_code=503, detail="Workflow history is temporarily unavailable.")
+    except Exception as e:
+        raise _storage_http_error("workflow_history", e, "Workflow history is temporarily unavailable.")
 
 
 @router.get(
@@ -690,8 +695,8 @@ def get_memory() -> MemoryResponse:
     try:
         pref = service.get_preferences()
         summary = service.get_memory_summary(preferences=pref)
-    except Exception:
-        raise HTTPException(status_code=503, detail="Preferences could not be loaded. Storage is unavailable.")
+    except Exception as e:
+        raise _storage_http_error("get_preferences", e, "Preferences could not be loaded. Storage is unavailable.")
     storage = get_persistence_status()
     return MemoryResponse(
         preferences=pref.model_dump(),
@@ -710,8 +715,8 @@ def get_memory() -> MemoryResponse:
 def get_memory_summary_endpoint() -> dict[str, str]:
     try:
         summary = MemoryService().get_memory_summary()
-    except Exception:
-        raise HTTPException(status_code=503, detail="Preferences could not be loaded. Storage is unavailable.")
+    except Exception as e:
+        raise _storage_http_error("get_memory_summary", e, "Preferences could not be loaded. Storage is unavailable.")
     return {"summary": summary, "status": "ok"}
 
 
@@ -781,10 +786,11 @@ def update_memory_endpoint(payload: MemoryUpdateRequest) -> Any:
         # A form edit replaces lists/maps with exactly what the student submitted.
         updated = service.update_preferences(clean, merge_collections=False)
         saved = service.get_preferences()
-    except Exception:
-        raise HTTPException(
-            status_code=503,
-            detail="Your preferences could not be saved. No successful save was confirmed.",
+    except Exception as e:
+        raise _storage_http_error(
+            "update_preferences",
+            e,
+            "Your preferences could not be saved. No successful save was confirmed.",
         )
     saved_dump = saved.model_dump()
     expected_dump = expected.model_dump()
@@ -827,10 +833,11 @@ def reset_memory_endpoint(payload: MemoryResetRequest) -> MemoryResetResponse:
     try:
         reset_pref = service.reset_preferences(confirmation=True)
         saved = service.get_preferences()
-    except Exception:
-        raise HTTPException(
-            status_code=503,
-            detail="Your preferences could not be reset. No successful reset was confirmed.",
+    except Exception as e:
+        raise _storage_http_error(
+            "reset_preferences",
+            e,
+            "Your preferences could not be reset. No successful reset was confirmed.",
         )
     defaults = StudentPreferences().model_dump(exclude={"updated_at"})
     if saved.model_dump(exclude={"updated_at"}) != defaults:

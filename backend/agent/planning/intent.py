@@ -23,8 +23,17 @@ _STUDY_VERBS = (
     "organize", "organise", "preparation", "prepare", "study plan", "plan my study",
     "revise", "revision", "study for"
 )
-_NUM_WORD = r"(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|half\s*(?:an?|a)|an?)"
-_DURATION = re.compile(r"\b" + _NUM_WORD + r"\s*(?:hours?|hrs?|minutes?|mins?)\b", re.IGNORECASE)
+_NUM_WORD = (
+    r"(?:(?:\b\d+\.\d+|\b\d+|\.\d+)"
+    r"|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+    r"|half(?:\s*(?:of\s+)?an?|\s+a)?"
+    r"|a\s+half"
+    r"|quarter"
+    r"|a\s+quarter"
+    r"|an?"
+    r")"
+)
+_DURATION = re.compile(r"(?:^|(?<=\s))" + _NUM_WORD + r"\s*(?:hours?|hrs?|minutes?|mins?)\b", re.IGNORECASE)
 _EXAM_WORDS = re.compile(r"\b(?:exam|exams|test|quiz|midterm|mid-term|finals?|viva)\b")
 _KNOWN_SUBJECTS = re.compile(r"\b(?:dbms|daa|os|cn|dsa|ml|ai|math|maths|physics|chemistry)\b")
 
@@ -125,3 +134,18 @@ def detect_intent(text: str) -> str:
         if matches(t):
             return name
     return "general planning"
+
+
+STUDY_PLANNING_INTENTS: frozenset[str] = frozenset({
+    "smart study planning",
+    "study schedule planning",
+    "chained preference and study plan",
+    "review and plan revision",
+    "task and schedule creation",
+})
+
+
+def is_study_planning_intent(intent: str) -> bool:
+    """Return True if intent represents any study-planning workflow."""
+    return intent in STUDY_PLANNING_INTENTS
+

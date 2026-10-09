@@ -403,6 +403,18 @@ class TestStudyPlanners(WorkflowTestBase):
             [("OS", 180), ("CN", 90), ("Physics", 90)],
         )
         self.assertEqual(_parse_study_requirements("2 hours of study and a meeting"), [])
+        self.assertEqual(_parse_study_requirements("Plan half an hour of DBMS"), [("DBMS", 30)])
+        self.assertEqual(_parse_study_requirements("Plan half   an   hour of DBMS"), [("DBMS", 30)])
+        self.assertEqual(_parse_study_requirements("Plan half a hour of DBMS"), [("DBMS", 30)])
+        self.assertEqual(_parse_study_requirements("Plan a half hour of DBMS"), [("DBMS", 30)])
+        self.assertEqual(_parse_study_requirements("Plan 2.5 hours of DBMS"), [("DBMS", 150)])
+        self.assertEqual(_parse_study_requirements("Plan 0.5 hours of DBMS"), [("DBMS", 30)])
+        self.assertEqual(_parse_study_requirements("Plan .5 hours of DBMS"), [("DBMS", 30)])
+        self.assertEqual(_parse_study_requirements("Plan 2   hours   of   DBMS"), [("DBMS", 120)])
+        self.assertEqual(_parse_study_requirements("Plan two hours of DBMS"), [("DBMS", 120)])
+        self.assertEqual(_parse_study_requirements("Plan three hours of DBMS"), [("DBMS", 180)])
+        self.assertEqual(_parse_study_requirements("DBMS for half an hour"), [("DBMS", 30)])
+        self.assertEqual(_parse_study_requirements("DBMS for 1.5 hours"), [("DBMS", 90)])
 
     def test_flagship_blocks_avoid_meeting_and_each_other(self):
         plan = plan_goal(UserGoal(goal=FLAGSHIP))
